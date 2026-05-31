@@ -12,17 +12,27 @@ Native macOS app for structured career tracking.
 - Appearance: light, dark, and system theme modes.
 - Demo data: seeded automatically on an empty data file, with sample work logs, interview opportunities, referral/cooldown cases, and document records.
 
-## Run
+## Build
 
-Use the project script:
+Use the project script to compile and launch the app:
 
 ```bash
 ./script/build_and_run.sh
 ```
 
-The Codex app Run action is wired to the same script.
+To verify the build without keeping the app in the foreground:
+
+```bash
+./script/build_and_run.sh --verify
+```
 
 The script directly compiles the SwiftUI sources with `swiftc`, stages `dist/Work Log.app`, and launches it as a real macOS app bundle. It avoids `swift build` because the active Command Line Tools install has a SwiftPM `PackageDescription` manifest-link mismatch on this machine.
+
+## Screenshot
+
+![Work Log app screenshot](image.png)
+
+The screenshot shows the tasks view of the app on macOS.
 
 ## App Icon
 
