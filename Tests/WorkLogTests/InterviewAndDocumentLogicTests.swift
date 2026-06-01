@@ -98,6 +98,27 @@ final class InterviewAndDocumentLogicTests: XCTestCase {
         XCTAssertTrue(recovered.isEmpty)
     }
 
+    func testSkillOptionsNormalizeDeduplicateAndJoin() {
+        let parsed = WorkExperienceSkillOptions.skills(
+            in: " Swift,Combine\nSwift ;  async loading ; COMBINE "
+        )
+
+        XCTAssertEqual(parsed, ["Swift", "Combine", "async loading"])
+        XCTAssertEqual(
+            WorkExperienceSkillOptions.joined(parsed + ["Swift"]),
+            "Swift, Combine, async loading"
+        )
+    }
+
+    func testSkillOptionsMergeKeepsSelectedSkillsAheadOfKnownOptions() {
+        let merged = WorkExperienceSkillOptions.merged(
+            existing: ["Combine", "Swift", "Profiling", "swift"],
+            selected: ["Async Loading", "swift"]
+        )
+
+        XCTAssertEqual(merged, ["Async Loading", "swift", "Combine", "Profiling"])
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let directory = fileManager.temporaryDirectory
             .appendingPathComponent("WorkLogLogicTests-\(UUID().uuidString)", isDirectory: true)

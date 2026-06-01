@@ -20,6 +20,13 @@ struct WorkExperienceView: View {
         return WorkExperienceTagOptions.all + customTags.uniqued()
     }
 
+    private var availableSkills: [String] {
+        WorkExperienceSkillOptions.merged(
+            existing: store.data.workExperiences.flatMap { WorkExperienceSkillOptions.skills(in: $0.skillsUsed) },
+            selected: []
+        )
+    }
+
     private var selectionBinding: Binding<UUID?> {
         Binding(
             get: { store.selectedWorkID },
@@ -118,7 +125,8 @@ struct WorkExperienceView: View {
 
                     WorkExperienceDetailView(
                         entry: binding,
-                        isEditing: $isEditing
+                        isEditing: $isEditing,
+                        availableSkillOptions: availableSkills
                     ) {
                         store.deleteSelectedWorkExperience()
                         isEditing = false
@@ -174,6 +182,7 @@ struct WorkExperienceView: View {
 private struct WorkExperienceDetailView: View {
     @Binding var entry: WorkExperience
     @Binding var isEditing: Bool
+    var availableSkillOptions: [String]
     var onDelete: () -> Void
     @State private var showDeleteConfirmation = false
 
@@ -197,7 +206,7 @@ private struct WorkExperienceDetailView: View {
                 }
 
                 if isEditing {
-                    WorkExperienceEditForm(entry: $entry)
+                    WorkExperienceEditForm(entry: $entry, availableSkillOptions: availableSkillOptions)
                 } else {
                     WorkExperienceReadOnlyView(entry: entry)
                 }
@@ -220,6 +229,11 @@ private struct WorkExperienceDetailView: View {
 private struct WorkExperienceReadOnlyView: View {
     var entry: WorkExperience
 
+    private var formattedSkillsUsed: String {
+        let skills = WorkExperienceSkillOptions.skills(in: entry.skillsUsed)
+        return skills.isEmpty ? entry.skillsUsed : WorkExperienceSkillOptions.joined(skills)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             ReadOnlyDetailField(title: "Company", value: entry.company)
@@ -233,7 +247,7 @@ private struct WorkExperienceReadOnlyView: View {
             ReadOnlyDetailField(title: "Date", value: AppDateFormatters.short(entry.date), hideWhenEmpty: false)
             ReadOnlyDetailField(title: "Situation", value: entry.situation, isLong: true)
             ReadOnlyDetailField(title: "Challenges", value: entry.challenges, isLong: true)
-            ReadOnlyDetailField(title: "Skills Used", value: entry.skillsUsed, isLong: true)
+            ReadOnlyDetailField(title: "Skills Used", value: formattedSkillsUsed, isLong: true)
             ReadOnlyDetailField(title: "Action", value: entry.action, isLong: true)
             ReadOnlyDetailField(title: "Outcome", value: entry.outcome, isLong: true)
             ReadOnlyDetailField(title: "Learning", value: entry.learning, isLong: true)
@@ -314,6 +328,7 @@ private struct WorkExperienceTableText: View {
 
 private struct WorkExperienceEditForm: View {
     @Binding var entry: WorkExperience
+    var availableSkillOptions: [String]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -356,7 +371,12 @@ private struct WorkExperienceEditForm: View {
 
             LabeledTextEditor(title: "Situation", text: $entry.situation, minHeight: 80)
             LabeledTextEditor(title: "Challenges", text: $entry.challenges, minHeight: 80)
-            LabeledTextEditor(title: "Skills Used", text: $entry.skillsUsed, minHeight: 70)
+            WorkFieldRow(title: "Skills Used") {
+                MultiSelectSkillPicker(
+                    skills: $entry.skillsUsed,
+                    allKnownSkills: availableSkillOptions
+                )
+            }
             LabeledTextEditor(title: "Action", text: $entry.action, minHeight: 80)
             LabeledTextEditor(title: "Outcome", text: $entry.outcome, minHeight: 80)
             LabeledTextEditor(title: "Learning", text: $entry.learning, minHeight: 80)
@@ -433,6 +453,183 @@ private struct MultiSelectTagMenu: View {
             values.append(tag)
         }
         tags = values.joined(separator: ", ")
+    }
+}
+
+private struct MultiSelectSkillPicker: View {
+    @Binding var skills: String
+    var allKnownSkills: [String]
+
+    @State private var isPresented = false
+    @State private var searchText = ""
+
+    private var selectedSkills: [String] {
+        WorkExperienceSkillOptions.skills(in: skills)
+    }
+
+    private var availableOptions: [String] {
+        WorkExperienceSkillOptions.merged(existing: allKnownSkills, selected: selectedSkills)
+    }
+
+    private var filteredOptions: [String] {
+        let query = WorkExperienceSkillOptions.normalize(searchText)
+        guard !query.isEmpty else { return availableOptions }
+        return availableOptions.filter { skill in
+            skill.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private var pendingNewSkill: String? {
+        let candidate = WorkExperienceSkillOptions.normalize(searchText)
+        guard !candidate.isEmpty else { return nil }
+        guard !WorkExperienceSkillOptions.contains(availableOptions, candidate: candidate) else {
+            return nil
+        }
+        return candidate
+    }
+
+    private var summaryText: String {
+        guard !selectedSkills.isEmpty else { return "Search, select, or add skills" }
+        if selectedSkills.count <= 3 {
+            return selectedSkills.joined(separator: ", ")
+        }
+        return "\(selectedSkills.prefix(3).joined(separator: ", ")) +\(selectedSkills.count - 3) more"
+    }
+
+    var body: some View {
+        Button {
+            isPresented = true
+        } label: {
+            HStack(alignment: .center, spacing: 8) {
+                Text(summaryText)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .foregroundStyle(selectedSkills.isEmpty ? .secondary : .primary)
+                Spacer(minLength: 12)
+                Image(systemName: "chevron.down")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Skills")
+                        .font(.headline)
+                    Text(selectedSkills.isEmpty ? "No skills selected" : "\(selectedSkills.count) selected")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("Search or add a skill", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .onSubmit {
+                            guard let newSkill = pendingNewSkill else { return }
+                            add(newSkill)
+                        }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
+
+                if let newSkill = pendingNewSkill {
+                    Button {
+                        add(newSkill)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "plus.circle.fill")
+                                .foregroundStyle(.workLogSkyBlue)
+                            Text("Add \"\(newSkill)\"")
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(filteredOptions, id: \.self) { skill in
+                            Button {
+                                toggle(skill)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: selectedSkills.contains(skill) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(selectedSkills.contains(skill) ? .workLogSkyBlue : .secondary)
+                                    Text(skill)
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                }
+                                .contentShape(Rectangle())
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(
+                                    selectedSkills.contains(skill)
+                                        ? Color.workLogSkyBlue.opacity(0.08)
+                                        : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 6)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if filteredOptions.isEmpty && pendingNewSkill == nil {
+                            Text("No matching skills")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 8)
+                        }
+                    }
+                }
+                .frame(minWidth: 340, idealWidth: 340, maxWidth: 340, minHeight: 160, maxHeight: 240)
+
+                Divider()
+
+                HStack {
+                    if !selectedSkills.isEmpty {
+                        Button("Clear Skills") {
+                            skills = ""
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Spacer()
+
+                    Button("Done") {
+                        isPresented = false
+                    }
+                }
+            }
+            .padding(14)
+            .onDisappear {
+                searchText = ""
+            }
+        }
+    }
+
+    private func toggle(_ skill: String) {
+        var values = selectedSkills
+        if let index = values.firstIndex(of: skill) {
+            values.remove(at: index)
+        } else {
+            values.append(skill)
+        }
+        skills = WorkExperienceSkillOptions.joined(values)
+    }
+
+    private func add(_ skill: String) {
+        guard !WorkExperienceSkillOptions.contains(selectedSkills, candidate: skill) else { return }
+        var values = selectedSkills
+        values.append(skill)
+        skills = WorkExperienceSkillOptions.joined(values)
+        searchText = ""
     }
 }
 

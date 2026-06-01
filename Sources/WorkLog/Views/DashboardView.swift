@@ -677,7 +677,7 @@ private struct TaskInsights {
     }
 
     private var uniqueSkills: [String] {
-        Array(Set(entries.flatMap { splitList($0.skillsUsed) })).sorted()
+        Array(Set(entries.flatMap { WorkExperienceSkillOptions.skills(in: $0.skillsUsed) })).sorted()
     }
 
     private var topSkills: [(name: String, count: Int)] {
@@ -777,7 +777,7 @@ private struct TaskInsights {
 
     private func topSkills(in entries: [WorkExperience]) -> [(name: String, count: Int)] {
         entries
-            .flatMap { splitList($0.skillsUsed) }
+            .flatMap { WorkExperienceSkillOptions.skills(in: $0.skillsUsed) }
             .reduce(into: [String: Int]()) { counts, skill in
                 counts[skill, default: 0] += 1
             }
@@ -808,13 +808,6 @@ private struct TaskInsights {
 
     private func pluralSuffix(_ count: Int) -> String {
         count == 1 ? "" : "s"
-    }
-
-    private func splitList(_ value: String) -> [String] {
-        value
-            .components(separatedBy: CharacterSet(charactersIn: ",\n;"))
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
     }
 
     private func splitWords(_ value: String) -> [String] {

@@ -148,3 +148,58 @@ struct WorkExperience: Identifiable, Codable, Hashable {
         .joined(separator: " ")
     }
 }
+
+enum WorkExperienceSkillOptions {
+    static func skills(in value: String) -> [String] {
+        uniqueSkills(
+            from: value.components(separatedBy: CharacterSet(charactersIn: ",;\n"))
+        )
+    }
+
+    static func joined(_ skills: [String]) -> String {
+        uniqueSkills(from: skills).joined(separator: ", ")
+    }
+
+    static func merged(existing: [String], selected: [String]) -> [String] {
+        let selectedSkills = uniqueSkills(from: selected)
+        let selectedKeys = Set(selectedSkills.map(skillKey(for:)))
+        let remainingSkills = uniqueSkills(from: existing)
+            .filter { !selectedKeys.contains(skillKey(for: $0)) }
+            .sorted { lhs, rhs in
+                lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+            }
+        return selectedSkills + remainingSkills
+    }
+
+    static func contains(_ skills: [String], candidate: String) -> Bool {
+        let candidateKey = skillKey(for: candidate)
+        return skills.contains { skillKey(for: $0) == candidateKey }
+    }
+
+    static func normalize(_ skill: String) -> String {
+        skill
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func uniqueSkills(from rawSkills: [String]) -> [String] {
+        var seen: Set<String> = []
+        var unique: [String] = []
+
+        for rawSkill in rawSkills {
+            let normalizedSkill = normalize(rawSkill)
+            guard !normalizedSkill.isEmpty else { continue }
+
+            let key = skillKey(for: normalizedSkill)
+            guard seen.insert(key).inserted else { continue }
+            unique.append(normalizedSkill)
+        }
+
+        return unique
+    }
+
+    private static func skillKey(for skill: String) -> String {
+        normalize(skill).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
+}
