@@ -33,6 +33,7 @@ The script directly compiles the SwiftUI sources with `swiftc`, stages `dist/Wor
 ![Work Log app screenshot](image.png)
 
 The screenshot shows the tasks view of the app on macOS.
+The data is dummy data in the screenshot.
 
 ## App Icon
 
