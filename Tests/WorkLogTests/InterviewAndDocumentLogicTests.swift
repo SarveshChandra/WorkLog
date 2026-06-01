@@ -9,14 +9,16 @@ final class InterviewAndDocumentLogicTests: XCTestCase {
         XCTAssertTrue(
             AppStore.shouldSeedDemoDataOnLaunch(
                 dataFileExists: false,
-                data: AppData()
+                data: AppData(),
+                allowsDemoData: true
             )
         )
 
         XCTAssertFalse(
             AppStore.shouldSeedDemoDataOnLaunch(
                 dataFileExists: true,
-                data: AppData()
+                data: AppData(),
+                allowsDemoData: true
             )
         )
 
@@ -27,7 +29,16 @@ final class InterviewAndDocumentLogicTests: XCTestCase {
                     workExperiences: [WorkExperience(company: "User Entry")],
                     interviewOpportunities: [],
                     documents: []
-                )
+                ),
+                allowsDemoData: true
+            )
+        )
+
+        XCTAssertFalse(
+            AppStore.shouldSeedDemoDataOnLaunch(
+                dataFileExists: false,
+                data: AppData(),
+                allowsDemoData: false
             )
         )
     }

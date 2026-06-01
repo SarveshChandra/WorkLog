@@ -4,8 +4,15 @@ set -euo pipefail
 MODE="${1:-run}"
 APP_NAME="WorkLog"
 BUNDLE_NAME="Work Log"
-BUNDLE_ID="com.local.WorkLog"
+BUNDLE_ID="${WORKLOG_BUNDLE_ID:-com.sarveshchandra.WorkLog}"
 MIN_SYSTEM_VERSION="13.0"
+APP_VERSION="${WORKLOG_VERSION:-1.0.0}"
+APP_BUILD="${WORKLOG_BUILD:-1}"
+APP_CATEGORY="${WORKLOG_APP_CATEGORY:-public.app-category.productivity}"
+RELEASE_CHANNEL="${WORKLOG_RELEASE_CHANNEL:-development}"
+SIGNING_IDENTITY="${WORKLOG_SIGNING_IDENTITY:-}"
+COPYRIGHT_TEXT="${WORKLOG_COPYRIGHT:-Copyright © $(date +%Y) Sarvesh Chandra}"
+ENABLE_DEMO_DATA_VALUE="${WORKLOG_ENABLE_DEMO_DATA:-0}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
@@ -29,6 +36,7 @@ SOURCE_FILES=(
   "$ROOT_DIR/Sources/WorkLog/Support/JSONCoders.swift"
   "$ROOT_DIR/Sources/WorkLog/Support/DateFormatters.swift"
   "$ROOT_DIR/Sources/WorkLog/Support/StringHelpers.swift"
+  "$ROOT_DIR/Sources/WorkLog/Support/AppRuntimeConfiguration.swift"
   "$ROOT_DIR/Sources/WorkLog/Support/AppIconArtwork.swift"
   "$ROOT_DIR/Sources/WorkLog/Support/DemoDataFactory.swift"
   "$ROOT_DIR/Sources/WorkLog/Services/DataPersistenceService.swift"
@@ -58,6 +66,15 @@ cp "$ROOT_DIR/Resources/Images/work-log-icon.png" "$APP_RESOURCES/work-log-icon.
 cp "$ROOT_DIR/Resources/Images/work-log-icon.pdf" "$APP_RESOURCES/work-log-icon.pdf"
 cp "$ROOT_DIR/Resources/WorkLogIcon.icns" "$APP_RESOURCES/WorkLogIcon.icns"
 
+# Remove Finder and quarantine metadata before signing or archiving the bundle.
+xattr -cr "$APP_BUNDLE"
+
+if [[ "$ENABLE_DEMO_DATA_VALUE" =~ ^([1Tt][Rr]?[Uu]?[Ee]?|[Yy][Ee]?[Ss]?|[Oo][Nn])$ ]]; then
+  ENABLE_DEMO_DATA_PLIST="<true/>"
+else
+  ENABLE_DEMO_DATA_PLIST="<false/>"
+fi
+
 cat >"$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -71,25 +88,52 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$BUNDLE_NAME</string>
   <key>CFBundleDisplayName</key>
   <string>$BUNDLE_NAME</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$APP_VERSION</string>
+  <key>CFBundleVersion</key>
+  <string>$APP_BUILD</string>
   <key>CFBundleIconFile</key>
   <string>WorkLogIcon</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>LSApplicationCategoryType</key>
+  <string>$APP_CATEGORY</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>ITSAppUsesNonExemptEncryption</key>
+  <false/>
   <key>LSMinimumSystemVersion</key>
   <string>$MIN_SYSTEM_VERSION</string>
+  <key>NSHumanReadableCopyright</key>
+  <string>$COPYRIGHT_TEXT</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
+  <key>WorkLogEnableDemoData</key>
+  $ENABLE_DEMO_DATA_PLIST
+  <key>WorkLogReleaseChannel</key>
+  <string>$RELEASE_CHANNEL</string>
 </dict>
 </plist>
 PLIST
+
+sign_bundle_if_requested() {
+  if [[ -z "$SIGNING_IDENTITY" ]]; then
+    return
+  fi
+
+  codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp "$APP_BINARY"
+  codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp "$APP_BUNDLE"
+}
+
+sign_bundle_if_requested
 
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"
 }
 
 case "$MODE" in
+  build|--build-only)
+    ;;
   run)
     open_app
     ;;
@@ -110,7 +154,7 @@ case "$MODE" in
     pgrep -x "$APP_NAME" >/dev/null
     ;;
   *)
-    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2
+    echo "usage: $0 [run|build|--debug|--logs|--telemetry|--verify]" >&2
     exit 2
     ;;
 esac

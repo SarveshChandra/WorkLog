@@ -40,7 +40,8 @@ final class AppStore: ObservableObject {
         seedDemoDataIfNeeded(
             shouldSeedDemoData: Self.shouldSeedDemoDataOnLaunch(
                 dataFileExists: dataFileExistsAtLaunch,
-                data: data
+                data: data,
+                allowsDemoData: AppRuntimeConfiguration.allowsDemoData
             )
         )
         migrateDemoWorkExperienceFieldsIfNeeded()
@@ -529,7 +530,8 @@ final class AppStore: ObservableObject {
         }
     }
 
-    static func shouldSeedDemoDataOnLaunch(dataFileExists: Bool, data: AppData) -> Bool {
+    static func shouldSeedDemoDataOnLaunch(dataFileExists: Bool, data: AppData, allowsDemoData: Bool) -> Bool {
+        guard allowsDemoData else { return false }
         guard !dataFileExists else { return false }
         return data.workExperiences.isEmpty
             && data.interviewOpportunities.isEmpty

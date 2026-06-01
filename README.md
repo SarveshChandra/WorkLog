@@ -10,7 +10,7 @@ Native macOS app for structured career tracking.
 - Settings: backup status, manual backup, restore latest backup, export JSON, and data folder shortcuts.
 - Top navigation: no sidebar; the app icon and title stay visible at the top.
 - Appearance: light, dark, and system theme modes.
-- Demo data: seeded automatically on an empty data file, with sample work logs, interview opportunities, referral/cooldown cases, and document records.
+- Demo data: disabled by default for production-style builds. You can still opt in for local testing.
 
 ## Build
 
@@ -27,6 +27,59 @@ To verify the build without keeping the app in the foreground:
 ```
 
 The script directly compiles the SwiftUI sources with `swiftc`, stages `dist/Work Log.app`, and launches it as a real macOS app bundle. It avoids `swift build` because the active Command Line Tools install has a SwiftPM `PackageDescription` manifest-link mismatch on this machine.
+
+To build without launching:
+
+```bash
+./script/build_and_run.sh build
+```
+
+To enable sample/demo data for local testing:
+
+```bash
+WORKLOG_ENABLE_DEMO_DATA=1 ./script/build_and_run.sh
+```
+
+## Production Packaging
+
+The app bundle now carries release metadata through Info.plist keys:
+
+- `CFBundleIdentifier`
+- `CFBundleShortVersionString`
+- `CFBundleVersion`
+- `LSApplicationCategoryType`
+- `WorkLogReleaseChannel`
+- `WorkLogEnableDemoData`
+
+Default build values can be overridden with environment variables:
+
+```bash
+WORKLOG_BUNDLE_ID=com.example.WorkLog
+WORKLOG_VERSION=1.0.0
+WORKLOG_BUILD=100
+WORKLOG_RELEASE_CHANNEL=release
+```
+
+To create a signed release bundle and zip archive:
+
+```bash
+WORKLOG_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+WORKLOG_VERSION=1.0.0 \
+WORKLOG_BUILD=100 \
+./script/package_release.sh
+```
+
+To include notarization and stapling in the same flow:
+
+```bash
+WORKLOG_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+WORKLOG_NOTARY_PROFILE="your-notarytool-profile" \
+WORKLOG_VERSION=1.0.0 \
+WORKLOG_BUILD=100 \
+./script/package_release.sh
+```
+
+Release packaging always forces `WORKLOG_ENABLE_DEMO_DATA=0`.
 
 ## Screenshot
 
@@ -53,16 +106,16 @@ Resources/WorkLogIcon.icns
 
 ## Data
 
-Local app data:
+Primary app data:
 
 ```text
-~/Library/Application Support/Work Log/work-log-data.json
+~/Library/Mobile Documents/com~apple~CloudDocs/Work Log/work-log-data.json
 ```
 
 Imported documents:
 
 ```text
-~/Library/Application Support/Work Log/Documents/
+~/Library/Mobile Documents/com~apple~CloudDocs/Work Log/Documents/
 ```
 
 Daily iCloud Drive backups:

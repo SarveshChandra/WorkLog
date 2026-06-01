@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var store: AppStore
+    private let buildInfo = AppRuntimeConfiguration.buildInfo
 
     var body: some View {
         ScrollView {
@@ -77,6 +78,19 @@ struct SettingsView: View {
                         SettingsPathRow(title: "Data file", value: store.dataFilePath)
                         SettingsPathRow(title: "Documents folder", value: store.documentsDirectoryPath)
                         SettingsPathRow(title: "Backup folder", value: store.backupDirectoryPath)
+                    }
+                }
+
+                GroupBox("App") {
+                    SettingsSectionContent {
+                        SettingsValueRow(title: "Version", value: buildInfo.version)
+                        SettingsValueRow(title: "Build", value: buildInfo.build)
+                        SettingsValueRow(title: "Release channel", value: buildInfo.releaseChannel.capitalized)
+                        SettingsValueRow(title: "Bundle identifier", value: buildInfo.bundleIdentifier)
+                        SettingsValueRow(
+                            title: "Demo data",
+                            value: AppRuntimeConfiguration.allowsDemoData ? "Enabled" : "Disabled"
+                        )
                     }
                 }
 
