@@ -8,12 +8,20 @@ struct BackupResult {
 }
 
 final class BackupService {
+    private static let defaultMaxBackupsPerLocation = 30
+
     private let fallbackBaseDirectory: URL
     private let cloudDocumentsDirectory: URL?
+    private let maxBackupsPerLocation: Int
 
-    init(fallbackBaseDirectory: URL, cloudDocumentsDirectory: URL? = nil) {
+    init(
+        fallbackBaseDirectory: URL,
+        cloudDocumentsDirectory: URL? = nil,
+        maxBackupsPerLocation: Int = BackupService.defaultMaxBackupsPerLocation
+    ) {
         self.fallbackBaseDirectory = fallbackBaseDirectory
         self.cloudDocumentsDirectory = cloudDocumentsDirectory
+        self.maxBackupsPerLocation = max(1, maxBackupsPerLocation)
     }
 
     func backupRoot() throws -> URL {
@@ -72,6 +80,7 @@ final class BackupService {
                     try FileManager.default.copyItem(at: documentsDirectory, to: documentsBackupURL)
                 }
 
+                try cleanupBackups(in: root)
                 backupURLs.append(backupFolder)
             } catch {
                 failures.append((root, error))
@@ -145,5 +154,26 @@ final class BackupService {
         let cloudDocs = cloudDocumentsDirectory ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs", isDirectory: true)
         return FileManager.default.fileExists(atPath: cloudDocs.path) ? cloudDocs : nil
+    }
+
+    private func cleanupBackups(in root: URL) throws {
+        let backupFolders = try FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        .filter { url in
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+                && isDirectory.boolValue
+                && FileManager.default.fileExists(atPath: url.appendingPathComponent("work-log-data.json").path)
+        }
+        .sorted { $0.lastPathComponent > $1.lastPathComponent }
+
+        guard backupFolders.count > maxBackupsPerLocation else { return }
+
+        for backupFolder in backupFolders.dropFirst(maxBackupsPerLocation) {
+            try FileManager.default.removeItem(at: backupFolder)
+        }
     }
 }

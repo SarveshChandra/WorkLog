@@ -66,6 +66,48 @@ final class BackupAndPersistenceTests: XCTestCase {
         XCTAssertTrue(result.backupURLs.contains(where: { $0.path == newBackup.path }))
     }
 
+    func testCreateBackupCleansUpOlderBackupsInBothCloudPaths() throws {
+        let tempRoot = try makeTemporaryDirectory()
+        defer { try? fileManager.removeItem(at: tempRoot) }
+
+        let fallbackBase = tempRoot.appendingPathComponent("ApplicationSupport/Work Log", isDirectory: true)
+        let cloudDocs = tempRoot.appendingPathComponent("CloudDocs", isDirectory: true)
+        try fileManager.createDirectory(at: cloudDocs, withIntermediateDirectories: true)
+
+        let service = BackupService(
+            fallbackBaseDirectory: fallbackBase,
+            cloudDocumentsDirectory: cloudDocs,
+            maxBackupsPerLocation: 2
+        )
+
+        let documentsDirectory = tempRoot.appendingPathComponent("Documents", isDirectory: true)
+        try fileManager.createDirectory(at: documentsDirectory, withIntermediateDirectories: true)
+        try "resume".data(using: .utf8)!.write(to: documentsDirectory.appendingPathComponent("resume.txt"), options: [.atomic])
+
+        let newRoot = cloudDocs
+            .appendingPathComponent("Vault", isDirectory: true)
+            .appendingPathComponent("Backups", isDirectory: true)
+            .appendingPathComponent("Work Log", isDirectory: true)
+        let legacyRoot = cloudDocs
+            .appendingPathComponent("Work Log", isDirectory: true)
+            .appendingPathComponent("Backups", isDirectory: true)
+
+        try createStubBackup(named: "WorkLogBackup_20260501_010101", in: newRoot)
+        try createStubBackup(named: "WorkLogBackup_20260501_010101", in: legacyRoot)
+        try createStubBackup(named: "WorkLogBackup_20260502_010101", in: newRoot)
+        try createStubBackup(named: "WorkLogBackup_20260502_010101", in: legacyRoot)
+
+        _ = try service.createBackup(data: AppData(), documentsDirectory: documentsDirectory)
+
+        let newNames = try backupFolderNames(in: newRoot)
+        let legacyNames = try backupFolderNames(in: legacyRoot)
+
+        XCTAssertEqual(newNames.count, 2)
+        XCTAssertEqual(legacyNames.count, 2)
+        XCTAssertFalse(newNames.contains("WorkLogBackup_20260501_010101"))
+        XCTAssertFalse(legacyNames.contains("WorkLogBackup_20260501_010101"))
+    }
+
     func testBackupRootFallsBackWhenCloudDocsMissing() throws {
         let tempRoot = try makeTemporaryDirectory()
         defer { try? fileManager.removeItem(at: tempRoot) }
@@ -148,6 +190,30 @@ final class BackupAndPersistenceTests: XCTestCase {
             .appendingPathComponent("WorkLogTests-\(UUID().uuidString)", isDirectory: true)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
+    }
+
+    private func createStubBackup(named folderName: String, in root: URL) throws {
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+        let backupFolder = root.appendingPathComponent(folderName, isDirectory: true)
+        try fileManager.createDirectory(at: backupFolder, withIntermediateDirectories: true)
+        try "{}".data(using: .utf8)!.write(
+            to: backupFolder.appendingPathComponent("work-log-data.json"),
+            options: [.atomic]
+        )
+    }
+
+    private func backupFolderNames(in root: URL) throws -> [String] {
+        try fileManager.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        .filter { url in
+            var isDirectory: ObjCBool = false
+            return fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
+        }
+        .map(\.lastPathComponent)
+        .sorted()
     }
 
     private func XCTAssertSingleBackupFolder(in root: URL) throws -> URL {
