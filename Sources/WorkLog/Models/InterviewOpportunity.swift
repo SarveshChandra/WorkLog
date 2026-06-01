@@ -370,8 +370,8 @@ struct InterviewOpportunity: Identifiable, Codable, Hashable {
         }
     }
 
-    var hasRoundOutcome: Bool {
-        interviewRounds.contains { !$0.result.isBlank }
+    var canSetCooldownPeriod: Bool {
+        canAppearInEligibleAgain
     }
 
     var calculatedLastActivityDate: Date {

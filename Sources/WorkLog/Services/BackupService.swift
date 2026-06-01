@@ -13,15 +13,18 @@ final class BackupService {
     private let fallbackBaseDirectory: URL
     private let cloudDocumentsDirectory: URL?
     private let maxBackupsPerLocation: Int
+    private let now: () -> Date
 
     init(
         fallbackBaseDirectory: URL,
         cloudDocumentsDirectory: URL? = nil,
-        maxBackupsPerLocation: Int = BackupService.defaultMaxBackupsPerLocation
+        maxBackupsPerLocation: Int = BackupService.defaultMaxBackupsPerLocation,
+        now: @escaping () -> Date = Date.init
     ) {
         self.fallbackBaseDirectory = fallbackBaseDirectory
         self.cloudDocumentsDirectory = cloudDocumentsDirectory
         self.maxBackupsPerLocation = max(1, maxBackupsPerLocation)
+        self.now = now
     }
 
     func backupRoot() throws -> URL {
@@ -47,19 +50,19 @@ final class BackupService {
 
     func backupIfNeeded(data: AppData, documentsDirectory: URL) throws -> BackupResult? {
         if let lastBackupDate = data.lastBackupDate,
-           Calendar.current.isDate(lastBackupDate, inSameDayAs: Date()) {
+           Calendar.current.isDate(lastBackupDate, inSameDayAs: now()) {
             return nil
         }
         return try createBackup(data: data, documentsDirectory: documentsDirectory)
     }
 
     func createBackup(data: AppData, documentsDirectory: URL) throws -> BackupResult {
-        let backupDate = Date()
+        let backupDate = now()
         var backupData = data
         backupData.lastBackupDate = backupDate
         let encoded = try JSONCoders.encoder.encode(backupData)
-        let backupFolderName = "WorkLogBackup_\(AppDateFormatters.backupStamp.string(from: backupDate))"
         let roots = backupRoots()
+        let backupFolderName = uniqueBackupFolderName(for: roots, backupDate: backupDate)
         var backupURLs: [URL] = []
         var failures: [(URL, Error)] = []
 
@@ -175,5 +178,23 @@ final class BackupService {
         for backupFolder in backupFolders.dropFirst(maxBackupsPerLocation) {
             try FileManager.default.removeItem(at: backupFolder)
         }
+    }
+
+    private func uniqueBackupFolderName(for roots: [URL], backupDate: Date) -> String {
+        let stamp = AppDateFormatters.backupStamp.string(from: backupDate)
+        let baseName = "WorkLogBackup_\(stamp)"
+        var candidate = baseName
+        var suffix = 1
+
+        while roots.contains(where: { root in
+            FileManager.default.fileExists(
+                atPath: root.appendingPathComponent(candidate, isDirectory: true).path
+            )
+        }) {
+            suffix += 1
+            candidate = "\(baseName)_\(String(format: "%03d", suffix))"
+        }
+
+        return candidate
     }
 }

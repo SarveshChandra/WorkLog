@@ -89,15 +89,17 @@ final class DocumentStorageService {
             currentFileName: currentURL.lastPathComponent
         )
         guard !desiredName.isEmpty else { return document }
-        let destinationURL = uniqueDestinationURL(desiredFileName: desiredName)
+        let destinationURL = destinationURLForRename(
+            currentURL: currentURL,
+            desiredFileName: desiredName
+        )
 
         if destinationURL.lastPathComponent != currentURL.lastPathComponent {
-            try FileManager.default.moveItem(at: currentURL, to: destinationURL)
+            try moveItemForRename(from: currentURL, to: destinationURL)
         }
 
         var updated = document
         updated.name = destinationURL.lastPathComponent
-        updated.originalFileName = destinationURL.lastPathComponent
         updated.storedFileName = destinationURL.lastPathComponent
         updated = refreshMetadata(for: updated)
         return updated
@@ -117,6 +119,7 @@ final class DocumentStorageService {
 
     func recordsForExistingFiles(excluding storedFileNames: Set<String>) throws -> [DocumentRecord] {
         guard FileManager.default.fileExists(atPath: documentsDirectory.path) else { return [] }
+        let normalizedStoredFileNames = Set(storedFileNames.map(normalizedFileNameKey))
 
         let files = try FileManager.default.contentsOfDirectory(
             at: documentsDirectory,
@@ -128,7 +131,7 @@ final class DocumentStorageService {
             guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
                 return nil
             }
-            guard !storedFileNames.contains(url.lastPathComponent) else { return nil }
+            guard !normalizedStoredFileNames.contains(normalizedFileNameKey(url.lastPathComponent)) else { return nil }
 
             let record = DocumentRecord(
                 name: url.lastPathComponent,
@@ -212,6 +215,10 @@ final class DocumentStorageService {
         return replaced.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private func normalizedFileNameKey(_ value: String) -> String {
+        value.folding(options: [.caseInsensitive], locale: nil)
+    }
+
     private func fileNameKeepingCurrentExtension(_ desiredFileName: String, currentFileName: String) -> String {
         let desiredURL = URL(fileURLWithPath: desiredFileName)
         guard desiredURL.pathExtension.isEmpty else { return desiredFileName }
@@ -231,6 +238,50 @@ final class DocumentStorageService {
         let suffix = UUID().uuidString.prefix(6)
         let finalName = ext.isEmpty ? "\(base)-\(suffix)" : "\(base)-\(suffix).\(ext)"
         return documentsDirectory.appendingPathComponent(finalName)
+    }
+
+    private func destinationURLForRename(currentURL: URL, desiredFileName: String) -> URL {
+        let desiredURL = documentsDirectory.appendingPathComponent(desiredFileName)
+
+        if desiredURL.lastPathComponent == currentURL.lastPathComponent {
+            return currentURL
+        }
+
+        if desiredURL.path.caseInsensitiveCompare(currentURL.path) == .orderedSame,
+           referencesSameFile(currentURL, desiredURL) {
+            return desiredURL
+        }
+
+        return uniqueDestinationURL(desiredFileName: desiredFileName)
+    }
+
+    private func moveItemForRename(from sourceURL: URL, to destinationURL: URL) throws {
+        if sourceURL.deletingLastPathComponent() == destinationURL.deletingLastPathComponent(),
+           sourceURL.lastPathComponent.caseInsensitiveCompare(destinationURL.lastPathComponent) == .orderedSame {
+            let temporaryURL = uniqueDestinationURL(
+                desiredFileName: ".rename-\(UUID().uuidString)-\(sourceURL.lastPathComponent)"
+            )
+            try FileManager.default.moveItem(at: sourceURL, to: temporaryURL)
+            try FileManager.default.moveItem(at: temporaryURL, to: destinationURL)
+            return
+        }
+
+        try FileManager.default.moveItem(at: sourceURL, to: destinationURL)
+    }
+
+    private func referencesSameFile(_ lhs: URL, _ rhs: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: rhs.path) else {
+            return lhs.path.caseInsensitiveCompare(rhs.path) == .orderedSame
+        }
+
+        let keys: Set<URLResourceKey> = [.fileResourceIdentifierKey]
+        let leftValues = try? lhs.resourceValues(forKeys: keys)
+        let rightValues = try? rhs.resourceValues(forKeys: keys)
+        guard let leftIdentifier = leftValues?.fileResourceIdentifier as AnyObject?,
+              let rightIdentifier = rightValues?.fileResourceIdentifier as AnyObject? else {
+            return false
+        }
+        return leftIdentifier.isEqual(rightIdentifier)
     }
 
     private func fileVersionFromXattr(url: URL) -> String? {

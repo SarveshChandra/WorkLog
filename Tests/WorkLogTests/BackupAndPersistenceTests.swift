@@ -185,6 +185,105 @@ final class BackupAndPersistenceTests: XCTestCase {
         XCTAssertTrue(fileManager.fileExists(atPath: preferredBackups.appendingPathComponent("old-backup.txt").path))
     }
 
+    func testMigrationStillMovesLegacyDocumentsAndBackupsWhenPreferredDataAlreadyExists() throws {
+        let tempRoot = try makeTemporaryDirectory()
+        defer { try? fileManager.removeItem(at: tempRoot) }
+
+        let legacyBase = tempRoot.appendingPathComponent("ApplicationSupport/Work Log", isDirectory: true)
+        let cloudDocs = tempRoot.appendingPathComponent("CloudDocs", isDirectory: true)
+        let preferredBase = cloudDocs.appendingPathComponent("Work Log", isDirectory: true)
+
+        try fileManager.createDirectory(at: legacyBase, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: preferredBase, withIntermediateDirectories: true)
+
+        let preferredData = AppData(
+            workExperiences: [WorkExperience(company: "Existing", designation: "Engineer", role: "macOS")],
+            interviewOpportunities: [],
+            documents: [],
+            dashboardInsightCache: nil,
+            lastBackupDate: nil,
+            lastBackupPath: nil,
+            createdAt: Date(timeIntervalSince1970: 1_700_100_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_100_100)
+        )
+        try JSONCoders.encoder.encode(preferredData).write(
+            to: preferredBase.appendingPathComponent("work-log-data.json"),
+            options: [.atomic]
+        )
+
+        let legacyDocs = legacyBase.appendingPathComponent("Documents", isDirectory: true)
+        try fileManager.createDirectory(at: legacyDocs, withIntermediateDirectories: true)
+        try "resume".data(using: .utf8)!.write(
+            to: legacyDocs.appendingPathComponent("resume.txt"),
+            options: [.atomic]
+        )
+
+        let legacyBackups = legacyBase.appendingPathComponent("Backups", isDirectory: true)
+        try fileManager.createDirectory(at: legacyBackups, withIntermediateDirectories: true)
+        try "backup".data(using: .utf8)!.write(
+            to: legacyBackups.appendingPathComponent("old-backup.txt"),
+            options: [.atomic]
+        )
+
+        _ = DataPersistenceService(
+            legacyBaseDirectory: legacyBase,
+            preferredBaseDirectory: preferredBase,
+            cloudDocumentsDirectory: cloudDocs,
+            fileManager: fileManager
+        )
+
+        let preferredDocs = preferredBase.appendingPathComponent("Documents", isDirectory: true)
+        XCTAssertTrue(fileManager.fileExists(atPath: preferredDocs.appendingPathComponent("resume.txt").path))
+
+        let preferredDataURL = preferredBase.appendingPathComponent("work-log-data.json")
+        let migratedData = try JSONCoders.decoder.decode(AppData.self, from: Data(contentsOf: preferredDataURL))
+        XCTAssertEqual(migratedData.workExperiences.first?.company, "Existing")
+
+        let preferredBackups = cloudDocs
+            .appendingPathComponent("Vault", isDirectory: true)
+            .appendingPathComponent("Backups", isDirectory: true)
+            .appendingPathComponent("Work Log", isDirectory: true)
+        XCTAssertTrue(fileManager.fileExists(atPath: preferredBackups.appendingPathComponent("old-backup.txt").path))
+    }
+
+    func testCreateBackupUsesUniqueFolderNamesWhenMultipleBackupsShareTimestamp() throws {
+        let tempRoot = try makeTemporaryDirectory()
+        defer { try? fileManager.removeItem(at: tempRoot) }
+
+        let fallbackBase = tempRoot.appendingPathComponent("ApplicationSupport/Work Log", isDirectory: true)
+        let cloudDocs = tempRoot.appendingPathComponent("CloudDocs", isDirectory: true)
+        try fileManager.createDirectory(at: cloudDocs, withIntermediateDirectories: true)
+
+        let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let service = BackupService(
+            fallbackBaseDirectory: fallbackBase,
+            cloudDocumentsDirectory: cloudDocs,
+            now: { fixedDate }
+        )
+
+        let documentsDirectory = tempRoot.appendingPathComponent("Documents", isDirectory: true)
+        try fileManager.createDirectory(at: documentsDirectory, withIntermediateDirectories: true)
+        try "resume".data(using: .utf8)!.write(
+            to: documentsDirectory.appendingPathComponent("resume.txt"),
+            options: [.atomic]
+        )
+
+        let first = try service.createBackup(data: AppData(), documentsDirectory: documentsDirectory)
+        let second = try service.createBackup(data: AppData(), documentsDirectory: documentsDirectory)
+
+        XCTAssertNotEqual(first.backupURL.lastPathComponent, second.backupURL.lastPathComponent)
+
+        let newRoot = cloudDocs
+            .appendingPathComponent("Vault", isDirectory: true)
+            .appendingPathComponent("Backups", isDirectory: true)
+            .appendingPathComponent("Work Log", isDirectory: true)
+        let names = try backupFolderNames(in: newRoot)
+
+        XCTAssertEqual(names.count, 2)
+        XCTAssertTrue(names.contains(first.backupURL.lastPathComponent))
+        XCTAssertTrue(names.contains(second.backupURL.lastPathComponent))
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let directory = fileManager.temporaryDirectory
             .appendingPathComponent("WorkLogTests-\(UUID().uuidString)", isDirectory: true)

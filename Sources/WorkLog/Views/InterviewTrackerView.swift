@@ -634,7 +634,7 @@ private struct InterviewOpportunityEditForm: View {
 
             InterviewCooldownField(
                 value: $opportunity.cooldownPeriodDays,
-                isEditable: opportunity.hasRoundOutcome
+                isEditable: opportunity.canSetCooldownPeriod
             )
         }
     }
@@ -870,7 +870,7 @@ private struct InterviewCooldownField: View {
                 .disabled(!isEditable)
                 .opacity(isEditable ? 1 : 0.55)
             } else {
-                Text(isEditable ? "Not set" : "Set a round outcome first")
+                Text(isEditable ? "Not set" : "Set a cooldown-eligible status first")
                     .foregroundStyle(.secondary)
             }
         }

@@ -27,6 +27,7 @@ final class AppStore: ObservableObject {
         self.backupService = BackupService(fallbackBaseDirectory: persistence.appSupportDirectory)
         self.documentService = DocumentStorageService(baseDirectory: persistence.appSupportDirectory)
         self.theme = AppTheme(rawValue: UserDefaults.standard.string(forKey: Self.themeDefaultsKey) ?? "") ?? .system
+        let dataFileExistsAtLaunch = FileManager.default.fileExists(atPath: persistence.dataFileURL.path)
 
         do {
             self.data = try persistence.load()
@@ -36,10 +37,14 @@ final class AppStore: ObservableObject {
             self.statusMessage = "Started with a new data file. \(error.localizedDescription)"
         }
 
-        seedDemoDataIfNeeded()
+        seedDemoDataIfNeeded(
+            shouldSeedDemoData: Self.shouldSeedDemoDataOnLaunch(
+                dataFileExists: dataFileExistsAtLaunch,
+                data: data
+            )
+        )
         migrateDemoWorkExperienceFieldsIfNeeded()
         migrateDemoInterviewFieldsIfNeeded()
-        addMissingDemoSamplesIfNeeded()
         migrateCooldownPeriodsIfNeeded()
         syncDiskDocumentsIfNeeded()
         refreshDocumentMetadataIfNeeded()
@@ -524,12 +529,15 @@ final class AppStore: ObservableObject {
         }
     }
 
-    private func seedDemoDataIfNeeded() {
-        let hasNoRecords = data.workExperiences.isEmpty
+    static func shouldSeedDemoDataOnLaunch(dataFileExists: Bool, data: AppData) -> Bool {
+        guard !dataFileExists else { return false }
+        return data.workExperiences.isEmpty
             && data.interviewOpportunities.isEmpty
             && data.documents.isEmpty
+    }
 
-        guard hasNoRecords else {
+    private func seedDemoDataIfNeeded(shouldSeedDemoData: Bool) {
+        guard shouldSeedDemoData else {
             try? documentService.createDemoDocumentsIfNeeded(for: data.documents)
             return
         }
@@ -572,52 +580,6 @@ final class AppStore: ObservableObject {
             } catch {
                 statusMessage = "Cooldown migration failed: \(error.localizedDescription)"
             }
-        }
-    }
-
-    private func addMissingDemoSamplesIfNeeded() {
-        let hasExistingDemoData = data.workExperiences.contains { work in
-            work.company == "Acme Systems"
-                && [
-                    "Reduced dashboard load time",
-                    "Built release checklist automation",
-                    "Documented onboarding flow"
-                ].contains(work.task)
-        } || data.interviewOpportunities.contains { opportunity in
-            [
-                "Northstar Labs",
-                "Cloudlane",
-                "FinGrid",
-                "DesignOps Studio"
-            ].contains(opportunity.company)
-        }
-
-        guard hasExistingDemoData else { return }
-
-        let latestDemoData = DemoDataFactory.makeData()
-        let existingTasks = Set(data.workExperiences.map(\.task))
-        let missingWorkExperiences = latestDemoData.workExperiences.filter { !existingTasks.contains($0.task) }
-
-        let existingOpportunities = Set(data.interviewOpportunities.map { "\($0.company)|\($0.role)" })
-        let missingOpportunities = latestDemoData.interviewOpportunities.filter {
-            !existingOpportunities.contains("\($0.company)|\($0.role)")
-        }
-
-        let existingDocuments = Set(data.documents.map(\.storedFileName))
-        let missingDocuments = latestDemoData.documents.filter { !existingDocuments.contains($0.storedFileName) }
-
-        guard !missingWorkExperiences.isEmpty || !missingOpportunities.isEmpty || !missingDocuments.isEmpty else { return }
-
-        data.workExperiences.append(contentsOf: missingWorkExperiences)
-        data.interviewOpportunities.append(contentsOf: missingOpportunities)
-        data.documents.append(contentsOf: missingDocuments)
-
-        do {
-            try documentService.createDemoDocumentsIfNeeded(for: data.documents)
-            try persistence.save(data)
-            statusMessage = "Added more demo data for testing."
-        } catch {
-            statusMessage = "Could not add new demo data: \(error.localizedDescription)"
         }
     }
 
