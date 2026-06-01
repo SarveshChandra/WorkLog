@@ -17,7 +17,8 @@ struct TopBarView: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Work Log")
-                        .font(.title3.weight(.bold))
+                        .font(.title3)
+                        .fontWeight(.bold)
                         .foregroundStyle(.workLogIconGreenDark)
                     Text(selection.rawValue)
                         .font(.caption2)

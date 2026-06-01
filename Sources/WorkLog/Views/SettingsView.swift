@@ -5,134 +5,113 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 22) {
                 Text("Settings")
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(Color.primary.opacity(0.85))
-                    .padding(.bottom, 2)
+                    .padding(.bottom, 4)
 
                 GroupBox("Appearance") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        SettingsRow(title: "Theme") {
-                            Picker("Theme", selection: $store.theme) {
-                                ForEach(AppTheme.allCases) { theme in
-                                    Text(theme.rawValue).tag(theme)
-                                }
+                    SettingsSectionContent {
+                        Picker("Theme", selection: $store.theme) {
+                            ForEach(AppTheme.allCases) { theme in
+                                Text(theme.rawValue).tag(theme)
                             }
-                            .pickerStyle(.segmented)
-                            .tint(.workLogSkyBlue)
-                            .frame(maxWidth: 360)
                         }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .tint(.workLogSkyBlue)
+                        .frame(maxWidth: 420)
                     }
-                    .padding(.top, 4)
-                    .padding(.bottom, 6)
                 }
 
                 GroupBox("Backup") {
-                    VStack(alignment: .leading, spacing: 12) {
+                    SettingsSectionContent {
                         SettingsValueRow(
                             title: "Last backup",
                             value: store.data.lastBackupDate.map(AppDateFormatters.statusDateTime.string) ?? "Not backed up yet"
                         )
 
                         if let lastBackupPath = store.data.lastBackupPath {
-                            Text(lastBackupPath)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
+                            SettingsPathValue(text: lastBackupPath)
                         }
 
-                        HStack(spacing: 12) {
+                        SettingsActionsRow {
                             Button {
                                 store.backupNow()
                             } label: {
                                 Label("Backup Now", systemImage: "arrow.triangle.2.circlepath")
-                                    .foregroundStyle(.secondary)
                             }
 
                             Button {
                                 store.restoreLatestBackup()
                             } label: {
                                 Label("Restore Latest", systemImage: "clock.arrow.circlepath")
-                                    .foregroundStyle(.secondary)
                             }
 
                             Button {
                                 store.openBackupFolder()
                             } label: {
                                 Label("Open Backup Folder", systemImage: "folder")
-                                    .foregroundStyle(.secondary)
                             }
-
-                            Spacer()
                         }
                     }
-                    .padding(.top, 4)
-                    .padding(.bottom, 6)
                 }
 
                 GroupBox("Data") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(spacing: 12) {
+                    SettingsSectionContent {
+                        SettingsActionsRow {
                             Button {
                                 store.exportJSON()
                             } label: {
                                 Label("Export JSON", systemImage: "square.and.arrow.up")
-                                    .foregroundStyle(.secondary)
                             }
 
                             Button {
                                 store.openDataFolder()
                             } label: {
                                 Label("Open Data Folder", systemImage: "folder")
-                                    .foregroundStyle(.secondary)
                             }
-
-                            Spacer()
                         }
 
                         SettingsPathRow(title: "Data file", value: store.dataFilePath)
                         SettingsPathRow(title: "Documents folder", value: store.documentsDirectoryPath)
                         SettingsPathRow(title: "Backup folder", value: store.backupDirectoryPath)
                     }
-                    .padding(.top, 4)
-                    .padding(.bottom, 6)
                 }
 
                 GroupBox("Status") {
-                    Text(store.statusMessage.isBlank ? "Ready" : store.statusMessage)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 2)
-                        .padding(.bottom, 2)
+                    SettingsSectionContent {
+                        Text(store.statusMessage.isBlank ? "Ready" : store.statusMessage)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .lineSpacing(2)
+                    }
                 }
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 24)
-            .padding(.top, 16)
-            .padding(.bottom, 24)
+            .padding(.horizontal, 28)
+            .padding(.top, 20)
+            .padding(.bottom, 28)
+            .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
 
-private struct SettingsRow<Content: View>: View {
-    var title: String
+private struct SettingsSectionContent<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Text(title)
-                .foregroundStyle(.workLogHeaderText)
-                .frame(width: 120, alignment: .leading)
+        VStack(alignment: .leading, spacing: 16) {
             content
-            Spacer(minLength: 0)
         }
+        .padding(.top, 8)
+        .padding(.bottom, 8)
     }
 }
 
@@ -141,12 +120,13 @@ private struct SettingsValueRow: View {
     var value: String
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        VStack(alignment: .leading, spacing: 7) {
             Text(title)
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.workLogHeaderText)
-            Spacer(minLength: 12)
             Text(value)
-                .foregroundStyle(.primary.opacity(0.9))
+                .font(.body)
+                .foregroundStyle(.primary.opacity(0.92))
         }
     }
 }
@@ -156,14 +136,49 @@ private struct SettingsPathRow: View {
     var value: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 7) {
             Text(title)
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.workLogHeaderText)
-            Text(value)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
+            SettingsPathValue(text: value)
         }
+    }
+}
+
+private struct SettingsPathValue: View {
+    var text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .lineSpacing(2)
+    }
+}
+
+private struct SettingsActionsRow<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(spacing: 10) {
+            content
+            Spacer(minLength: 0)
+        }
+        .buttonStyle(SettingsActionButtonStyle())
+    }
+}
+
+private struct SettingsActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 9)
+                    .fill(Color.primary.opacity(configuration.isPressed ? 0.08 : 0.045))
+            )
     }
 }
