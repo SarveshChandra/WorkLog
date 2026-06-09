@@ -66,6 +66,47 @@ final class AppStore: ObservableObject {
         return roots.map(\.path).joined(separator: "\n")
     }
 
+    var availableCompanyOptions: [String] {
+        Self.availableCompanies(in: data)
+    }
+
+    func availableWorkExperienceOptions(for keyPath: KeyPath<WorkExperience, String>) -> [String] {
+        Self.availableWorkExperienceOptions(in: data, for: keyPath)
+    }
+
+    static func availableCompanies(in data: AppData) -> [String] {
+        availableNormalizedOptions(data.workExperiences.map(\.company) + data.documents.map(\.company))
+    }
+
+    static func availableWorkExperienceOptions(
+        in data: AppData,
+        for keyPath: KeyPath<WorkExperience, String>
+    ) -> [String] {
+        availableNormalizedOptions(data.workExperiences.map { $0[keyPath: keyPath] })
+    }
+
+    private static func availableNormalizedOptions(_ values: [String]) -> [String] {
+        var uniqueValuesByKey: [String: String] = [:]
+
+        for value in values {
+            let normalizedKey = normalizedDropdownOptionKey(value)
+            guard !normalizedKey.isEmpty else { continue }
+            let displayValue = normalizedDropdownOptionDisplay(value)
+            if let existingDisplayValue = uniqueValuesByKey[normalizedKey] {
+                uniqueValuesByKey[normalizedKey] = preferredDropdownOptionDisplay(
+                    existing: existingDisplayValue,
+                    candidate: displayValue
+                )
+            } else {
+                uniqueValuesByKey[normalizedKey] = displayValue
+            }
+        }
+
+        return uniqueValuesByKey.values.sorted {
+            $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+        }
+    }
+
     func addWorkExperience() {
         let entry = WorkExperience()
         data.workExperiences.insert(entry, at: 0)
@@ -271,11 +312,22 @@ final class AppStore: ObservableObject {
     }
 
     private static func normalizedCompanyKey(_ company: String) -> String {
-        company
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .split(whereSeparator: \.isWhitespace)
-            .joined(separator: " ")
-            .lowercased()
+        company.collapsedWhitespace.lowercased()
+    }
+
+    private static func normalizedDropdownOptionKey(_ value: String) -> String {
+        value.collapsedWhitespace.lowercased()
+    }
+
+    private static func normalizedDropdownOptionDisplay(_ value: String) -> String {
+        value.collapsedWhitespace
+    }
+
+    private static func preferredDropdownOptionDisplay(existing: String, candidate: String) -> String {
+        if existing == existing.lowercased(), candidate != candidate.lowercased() {
+            return candidate
+        }
+        return existing
     }
 
     private static func isMoreRecentOpportunity(_ lhs: InterviewOpportunity, than rhs: InterviewOpportunity) -> Bool {

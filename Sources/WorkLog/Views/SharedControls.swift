@@ -74,6 +74,198 @@ struct SearchField: View {
     }
 }
 
+struct SingleSelectAddablePicker: View {
+    var title: String
+    var placeholder: String
+    var emptySelectionText: String
+    var searchPrompt: String
+    var noMatchesText: String
+    var clearButtonTitle: String
+    @Binding var selection: String
+    var options: [String]
+
+    @State private var isPresented = false
+    @State private var searchText = ""
+
+    private var selectedValue: String {
+        selection.collapsedWhitespace
+    }
+
+    private var filteredOptions: [String] {
+        let query = searchText.collapsedWhitespace
+        guard !query.isEmpty else { return options }
+        return options.filter { option in
+            option.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private var pendingNewOption: String? {
+        let candidate = searchText.collapsedWhitespace
+        guard !candidate.isEmpty else { return nil }
+        guard !options.contains(where: { option in
+            option.collapsedWhitespace.localizedCaseInsensitiveCompare(candidate) == .orderedSame
+        }) else {
+            return nil
+        }
+        return candidate
+    }
+
+    private var summaryText: String {
+        selectedValue.isBlank ? placeholder : selectedValue
+    }
+
+    var body: some View {
+        Button {
+            isPresented = true
+        } label: {
+            HStack(alignment: .center, spacing: 8) {
+                Text(summaryText)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .foregroundStyle(selectedValue.isBlank ? .secondary : .primary)
+                Spacer(minLength: 12)
+                Image(systemName: "chevron.down")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.headline)
+                    Text(selectedValue.isBlank ? emptySelectionText : selectedValue)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField(searchPrompt, text: $searchText)
+                        .textFieldStyle(.plain)
+                        .onSubmit {
+                            if let newOption = pendingNewOption {
+                                select(newOption)
+                            } else if filteredOptions.count == 1 {
+                                select(filteredOptions[0])
+                            }
+                        }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
+
+                if let newOption = pendingNewOption {
+                    Button {
+                        select(newOption)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "plus.circle.fill")
+                                .foregroundStyle(.workLogSkyBlue)
+                            Text("Add \"\(newOption)\"")
+                                .foregroundStyle(.primary)
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(filteredOptions, id: \.self) { option in
+                            Button {
+                                select(option)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: isSelected(option) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(isSelected(option) ? .workLogSkyBlue : .secondary)
+                                    Text(option)
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                }
+                                .contentShape(Rectangle())
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(
+                                    isSelected(option)
+                                        ? Color.workLogSkyBlue.opacity(0.08)
+                                        : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 6)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if filteredOptions.isEmpty && pendingNewOption == nil {
+                            Text(noMatchesText)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 8)
+                        }
+                    }
+                }
+                .frame(minWidth: 320, idealWidth: 320, maxWidth: 320, minHeight: 160, maxHeight: 220)
+
+                Divider()
+
+                HStack {
+                    if !selectedValue.isBlank {
+                        Button(clearButtonTitle) {
+                            selection = ""
+                            isPresented = false
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Spacer()
+
+                    Button("Done") {
+                        isPresented = false
+                    }
+                }
+            }
+            .padding(14)
+            .onDisappear {
+                searchText = ""
+            }
+        }
+    }
+
+    private func isSelected(_ option: String) -> Bool {
+        option.collapsedWhitespace.localizedCaseInsensitiveCompare(selectedValue) == .orderedSame
+    }
+
+    private func select(_ option: String) {
+        selection = option.collapsedWhitespace
+        isPresented = false
+    }
+}
+
+struct SingleSelectCompanyPicker: View {
+    var placeholder: String
+    @Binding var company: String
+    var options: [String]
+
+    var body: some View {
+        SingleSelectAddablePicker(
+            title: "Company",
+            placeholder: placeholder,
+            emptySelectionText: "No company selected",
+            searchPrompt: "Search or add a company",
+            noMatchesText: "No matching companies",
+            clearButtonTitle: "Clear Company",
+            selection: $company,
+            options: options
+        )
+    }
+}
+
 struct EmptyDetailView: View {
     var title: String
     var message: String

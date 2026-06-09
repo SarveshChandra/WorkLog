@@ -29,6 +29,21 @@ struct WorkExperienceView: View {
         )
     }
 
+    private var availableCompanies: [String] {
+        store.availableCompanyOptions
+    }
+
+    private var dropdownOptions: WorkExperienceDropdownOptions {
+        WorkExperienceDropdownOptions(
+            company: availableCompanies,
+            designation: store.availableWorkExperienceOptions(for: \.designation),
+            role: store.availableWorkExperienceOptions(for: \.role),
+            projectProduct: store.availableWorkExperienceOptions(for: \.projectProduct),
+            team: store.availableWorkExperienceOptions(for: \.team),
+            feature: store.availableWorkExperienceOptions(for: \.feature)
+        )
+    }
+
     private var rowHighlights: [TableRowHighlight] {
         entries.map { entry in
             if entry.isOverdueForTaskList(referenceDate: taskListReferenceDay) {
@@ -162,7 +177,8 @@ struct WorkExperienceView: View {
                     WorkExperienceDetailView(
                         entry: binding,
                         isEditing: $isEditing,
-                        availableSkillOptions: availableSkills
+                        availableSkillOptions: availableSkills,
+                        dropdownOptions: dropdownOptions
                     ) {
                         store.deleteSelectedWorkExperience()
                         isEditing = false
@@ -229,6 +245,7 @@ private struct WorkExperienceDetailView: View {
     @Binding var entry: WorkExperience
     @Binding var isEditing: Bool
     var availableSkillOptions: [String]
+    var dropdownOptions: WorkExperienceDropdownOptions
     var onDelete: () -> Void
     @State private var showDeleteConfirmation = false
     @State private var selectedTab: WorkExperienceDetailTab = .overview
@@ -265,6 +282,7 @@ private struct WorkExperienceDetailView: View {
                     WorkExperienceEditForm(
                         entry: $entry,
                         availableSkillOptions: availableSkillOptions,
+                        dropdownOptions: dropdownOptions,
                         selectedTab: selectedTab
                     )
                 } else {
@@ -291,6 +309,15 @@ private enum WorkExperienceDetailTab: String, CaseIterable, Identifiable {
     case subtasks = "Subtasks"
 
     var id: String { rawValue }
+}
+
+private struct WorkExperienceDropdownOptions {
+    var company: [String]
+    var designation: [String]
+    var role: [String]
+    var projectProduct: [String]
+    var team: [String]
+    var feature: [String]
 }
 
 private struct WorkExperienceReadOnlyView: View {
@@ -420,6 +447,7 @@ private struct WorkExperienceTableCell<Content: View>: View {
 private struct WorkExperienceEditForm: View {
     @Binding var entry: WorkExperience
     var availableSkillOptions: [String]
+    var dropdownOptions: WorkExperienceDropdownOptions
     var selectedTab: WorkExperienceDetailTab
 
     var body: some View {
@@ -427,27 +455,82 @@ private struct WorkExperienceEditForm: View {
         case .overview:
             VStack(alignment: .leading, spacing: 14) {
                 WorkFieldRow(title: "Company") {
-                    TextField("Company", text: $entry.company)
+                    SingleSelectCompanyPicker(
+                        placeholder: "Select or add a company",
+                        company: $entry.company,
+                        options: dropdownOptions.company
+                    )
+                    .frame(maxWidth: 260, alignment: .leading)
                 }
 
                 WorkFieldRow(title: "Designation") {
-                    TextField("Designation", text: $entry.designation)
+                    SingleSelectAddablePicker(
+                        title: "Designation",
+                        placeholder: "Select or add a designation",
+                        emptySelectionText: "No designation selected",
+                        searchPrompt: "Search or add a designation",
+                        noMatchesText: "No matching designations",
+                        clearButtonTitle: "Clear Designation",
+                        selection: $entry.designation,
+                        options: dropdownOptions.designation
+                    )
+                    .frame(maxWidth: 260, alignment: .leading)
                 }
 
                 WorkFieldRow(title: "Role") {
-                    TextField("Role", text: $entry.role)
+                    SingleSelectAddablePicker(
+                        title: "Role",
+                        placeholder: "Select or add a role",
+                        emptySelectionText: "No role selected",
+                        searchPrompt: "Search or add a role",
+                        noMatchesText: "No matching roles",
+                        clearButtonTitle: "Clear Role",
+                        selection: $entry.role,
+                        options: dropdownOptions.role
+                    )
+                    .frame(maxWidth: 260, alignment: .leading)
                 }
 
                 WorkFieldRow(title: "Product / Project") {
-                    TextField("Product or project", text: $entry.projectProduct)
+                    SingleSelectAddablePicker(
+                        title: "Product / Project",
+                        placeholder: "Select or add a product / project",
+                        emptySelectionText: "No product / project selected",
+                        searchPrompt: "Search or add a product or project",
+                        noMatchesText: "No matching products or projects",
+                        clearButtonTitle: "Clear Product / Project",
+                        selection: $entry.projectProduct,
+                        options: dropdownOptions.projectProduct
+                    )
+                    .frame(maxWidth: 260, alignment: .leading)
                 }
 
                 WorkFieldRow(title: "Team") {
-                    TextField("Team", text: $entry.team)
+                    SingleSelectAddablePicker(
+                        title: "Team",
+                        placeholder: "Select or add a team",
+                        emptySelectionText: "No team selected",
+                        searchPrompt: "Search or add a team",
+                        noMatchesText: "No matching teams",
+                        clearButtonTitle: "Clear Team",
+                        selection: $entry.team,
+                        options: dropdownOptions.team
+                    )
+                    .frame(maxWidth: 260, alignment: .leading)
                 }
 
                 WorkFieldRow(title: "Feature") {
-                    TextField("Feature", text: $entry.feature)
+                    SingleSelectAddablePicker(
+                        title: "Feature",
+                        placeholder: "Select or add a feature",
+                        emptySelectionText: "No feature selected",
+                        searchPrompt: "Search or add a feature",
+                        noMatchesText: "No matching features",
+                        clearButtonTitle: "Clear Feature",
+                        selection: $entry.feature,
+                        options: dropdownOptions.feature
+                    )
+                    .frame(maxWidth: 260, alignment: .leading)
                 }
 
                 LabeledTextEditor(title: "Situation", text: $entry.situation, minHeight: 80)

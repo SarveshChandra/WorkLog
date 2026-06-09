@@ -6,10 +6,28 @@ import Quartz
 struct DocumentsView: View {
     @EnvironmentObject private var store: AppStore
     @State private var searchText = ""
+    @State private var selectedCompany = ""
+    @State private var selectedType = ""
     @State private var isEditing = false
 
     private var documents: [DocumentRecord] {
-        store.filteredDocuments(search: searchText)
+        store.filteredDocuments(search: searchText).filter { document in
+            matchesSelectedCompany(document) && matchesSelectedType(document)
+        }
+    }
+
+    private var availableCompanies: [String] {
+        store.availableCompanyOptions
+    }
+
+    private var availableDocumentCompanies: [String] {
+        AppStore.availableCompanies(in: AppData(documents: store.data.documents))
+    }
+
+    private var availableDocumentTypes: [DocumentKind] {
+        DocumentKind.allCases.filter { kind in
+            store.data.documents.contains { $0.kind == kind }
+        }
     }
 
     private var selectionBinding: Binding<UUID?> {
@@ -29,8 +47,34 @@ struct DocumentsView: View {
                 subtitle: "Store important career files without linking them to interviews."
             ) {
                 SearchField(placeholder: "Search documents", text: searchBinding)
+                Picker("Company", selection: companyFilterBinding) {
+                    Text("All Companies").tag("")
+                    ForEach(availableDocumentCompanies, id: \.self) { company in
+                        Text(company).tag(company)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .tint(selectedCompany.isEmpty ? .secondary : .workLogSkyBlue)
+                .frame(width: 190)
+                .opacity(selectedCompany.isEmpty ? 0.62 : 1)
+
+                Picker("Type", selection: typeFilterBinding) {
+                    Text("All Types").tag("")
+                    ForEach(availableDocumentTypes) { kind in
+                        Text(kind.rawValue).tag(kind.rawValue)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .tint(selectedType.isEmpty ? .secondary : .workLogSkyBlue)
+                .frame(width: 150)
+                .opacity(selectedType.isEmpty ? 0.62 : 1)
+
                 Button {
                     searchText = ""
+                    selectedCompany = ""
+                    selectedType = ""
                     store.importDocument()
                 } label: {
                     Label("Import", systemImage: "square.and.arrow.down")
@@ -85,7 +129,8 @@ struct DocumentsView: View {
 
                     DocumentDetailView(
                         document: binding,
-                        isEditing: $isEditing
+                        isEditing: $isEditing,
+                        availableCompanyOptions: availableCompanies
                     ) {
                         store.deleteSelectedDocument()
                         isEditing = false
@@ -99,6 +144,7 @@ struct DocumentsView: View {
         .padding(.top, 12)
         .padding(.bottom, 16)
         .onReceive(store.$data) { _ in
+            normalizeFilters()
             reconcileSelection()
         }
     }
@@ -113,11 +159,55 @@ struct DocumentsView: View {
         )
     }
 
+    private var companyFilterBinding: Binding<String> {
+        Binding(
+            get: { selectedCompany },
+            set: { newValue in
+                selectedCompany = newValue
+                reconcileSelection()
+            }
+        )
+    }
+
+    private var typeFilterBinding: Binding<String> {
+        Binding(
+            get: { selectedType },
+            set: { newValue in
+                selectedType = newValue
+                reconcileSelection()
+            }
+        )
+    }
+
     private func reconcileSelection() {
         guard let selectedID = store.selectedDocumentID else { return }
         guard !documents.contains(where: { $0.id == selectedID }) else { return }
         store.selectedDocumentID = documents.first?.id
         isEditing = false
+    }
+
+    private func normalizeFilters() {
+        if !selectedCompany.isEmpty,
+           !availableDocumentCompanies.contains(where: {
+               $0.localizedCaseInsensitiveCompare(selectedCompany) == .orderedSame
+           }) {
+            selectedCompany = ""
+        }
+
+        if !selectedType.isEmpty,
+           !availableDocumentTypes.contains(where: { $0.rawValue == selectedType }) {
+            selectedType = ""
+        }
+    }
+
+    private func matchesSelectedCompany(_ document: DocumentRecord) -> Bool {
+        guard !selectedCompany.isEmpty else { return true }
+        return document.company.collapsedWhitespace.localizedCaseInsensitiveCompare(selectedCompany) == .orderedSame
+    }
+
+    private func matchesSelectedType(_ document: DocumentRecord) -> Bool {
+        guard !selectedType.isEmpty else { return true }
+        return document.kind.rawValue == selectedType
     }
 }
 
@@ -125,6 +215,7 @@ private struct DocumentDetailView: View {
     @EnvironmentObject private var store: AppStore
     @Binding var document: DocumentRecord
     @Binding var isEditing: Bool
+    var availableCompanyOptions: [String]
     var onDelete: () -> Void
     @State private var showDeleteConfirmation = false
     @State private var draftFileName: String = ""
@@ -182,7 +273,11 @@ private struct DocumentDetailView: View {
                     }
 
                 if isEditing {
-                    DocumentEditForm(document: $document, fileName: $draftFileName)
+                    DocumentEditForm(
+                        document: $document,
+                        fileName: $draftFileName,
+                        availableCompanyOptions: availableCompanyOptions
+                    )
                 } else {
                     DocumentReadOnlyView(document: document)
                 }
@@ -357,6 +452,7 @@ private struct DocumentReadOnlyView: View {
 private struct DocumentEditForm: View {
     @Binding var document: DocumentRecord
     @Binding var fileName: String
+    var availableCompanyOptions: [String]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -383,7 +479,12 @@ private struct DocumentEditForm: View {
             ReadOnlyDetailField(title: "Created", value: document.fileCreatedAt.map(AppDateFormatters.short) ?? "", hideWhenEmpty: false)
 
             FieldRow(title: "Company") {
-                TextField("Optional company", text: $document.company)
+                SingleSelectCompanyPicker(
+                    placeholder: "Select or add a company",
+                    company: $document.company,
+                    options: availableCompanyOptions
+                )
+                .frame(maxWidth: 260, alignment: .leading)
             }
 
             FieldRow(title: "Original File") {

@@ -130,6 +130,42 @@ final class InterviewAndDocumentLogicTests: XCTestCase {
         XCTAssertEqual(merged, ["Async Loading", "swift", "Combine", "Profiling"])
     }
 
+    func testAvailableCompaniesMergeTrimDeduplicateAndSortAcrossTasksAndDocuments() {
+        let companies = AppStore.availableCompanies(
+            in: AppData(
+                workExperiences: [
+                    WorkExperience(company: "  Zebra Labs  "),
+                    WorkExperience(company: "acme"),
+                    WorkExperience(company: "")
+                ],
+                interviewOpportunities: [],
+                documents: [
+                    DocumentRecord(company: "Acme"),
+                    DocumentRecord(company: "Blue   Ocean"),
+                    DocumentRecord(company: " ")
+                ]
+            )
+        )
+
+        XCTAssertEqual(companies, ["Acme", "Blue Ocean", "Zebra Labs"])
+    }
+
+    func testAvailableWorkExperienceOptionsMergeTrimDeduplicateAndSort() {
+        let designations = AppStore.availableWorkExperienceOptions(
+            in: AppData(
+                workExperiences: [
+                    WorkExperience(designation: "ios engineer"),
+                    WorkExperience(designation: "  Staff   Engineer  "),
+                    WorkExperience(designation: "iOS Engineer"),
+                    WorkExperience(designation: "")
+                ]
+            ),
+            for: \.designation
+        )
+
+        XCTAssertEqual(designations, ["iOS Engineer", "Staff Engineer"])
+    }
+
     func testWorkExperienceLegacyDateDecodesIntoStartDate() throws {
         let legacyDate = Date(timeIntervalSince1970: 1_700_000_000)
         let json = """
