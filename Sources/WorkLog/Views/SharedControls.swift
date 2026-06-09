@@ -20,6 +20,14 @@ extension ShapeStyle where Self == Color {
     static var workLogHeaderText: Color {
         Color.secondary.opacity(0.72)
     }
+
+    static var workLogDoingYellow: Color {
+        Color(red: 0.76, green: 0.60, blue: 0.10)
+    }
+
+    static var workLogPendingCream: Color {
+        Color(red: 0.99, green: 0.96, blue: 0.88)
+    }
 }
 
 struct PageHeader<Actions: View>: View {
@@ -243,7 +251,15 @@ struct ReadOnlyDetailField: View {
     }
 }
 
+enum TableRowHighlight {
+    case none
+    case pending
+    case overdue
+}
+
 struct TableHeaderFontInstaller: NSViewRepresentable {
+    var rowHighlights: [TableRowHighlight]? = nil
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
         scheduleHeaderUpdates(from: view)
@@ -257,29 +273,117 @@ struct TableHeaderFontInstaller: NSViewRepresentable {
     private func scheduleHeaderUpdates(from view: NSView) {
         for delay in [0.0, 0.05, 0.15, 0.35, 0.75, 1.25] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                applyHeaderFont(from: view)
+                applyTableStyling(from: view)
             }
         }
     }
 
-    private func applyHeaderFont(from view: NSView) {
+    private func applyTableStyling(from view: NSView) {
+        if let tableView = Self.findNearestTable(from: view) {
+            Self.update(tableView: tableView, rowHighlights: rowHighlights)
+            return
+        }
+
         guard let contentView = view.window?.contentView else { return }
-        Self.updateTables(in: contentView)
+        Self.updateTables(in: contentView, rowHighlights: rowHighlights)
     }
 
-    private static func updateTables(in view: NSView) {
+    private static func updateTables(in view: NSView, rowHighlights: [TableRowHighlight]?) {
         if let tableView = view as? NSTableView {
-            for column in tableView.tableColumns {
-                let title = column.headerCell.stringValue.isEmpty ? column.title : column.headerCell.stringValue
-                column.headerCell = WorkLogTableHeaderCell(textCell: title)
-            }
-            tableView.headerView?.needsDisplay = true
-            tableView.needsDisplay = true
+            update(tableView: tableView, rowHighlights: rowHighlights)
         }
 
         for subview in view.subviews {
-            updateTables(in: subview)
+            updateTables(in: subview, rowHighlights: rowHighlights)
         }
+    }
+
+    private static func update(tableView: NSTableView, rowHighlights: [TableRowHighlight]?) {
+        for column in tableView.tableColumns {
+            let title = column.headerCell.stringValue.isEmpty ? column.title : column.headerCell.stringValue
+            column.headerCell = WorkLogTableHeaderCell(textCell: title)
+        }
+        applyRowHighlights(rowHighlights, to: tableView)
+        tableView.headerView?.needsDisplay = true
+        tableView.needsDisplay = true
+    }
+
+    private static func applyRowHighlights(_ rowHighlights: [TableRowHighlight]?, to tableView: NSTableView) {
+        guard let rowHighlights else { return }
+
+        let alternatingRowBackgroundColors = NSColor.alternatingContentBackgroundColors
+        let pendingBackgroundColor = NSColor(
+            calibratedRed: 0.99,
+            green: 0.96,
+            blue: 0.88,
+            alpha: 1
+        )
+        let overdueBackgroundColor = NSColor(
+            calibratedRed: 0.99,
+            green: 0.88,
+            blue: 0.88,
+            alpha: 1
+        )
+
+        for row in 0..<tableView.numberOfRows {
+            guard let rowView = tableView.rowView(atRow: row, makeIfNecessary: true) else { continue }
+            let defaultBackgroundColor: NSColor
+            if tableView.usesAlternatingRowBackgroundColors, !alternatingRowBackgroundColors.isEmpty {
+                defaultBackgroundColor = alternatingRowBackgroundColors[row % alternatingRowBackgroundColors.count]
+            } else {
+                defaultBackgroundColor = tableView.backgroundColor
+            }
+            let rowHighlight = row < rowHighlights.count ? rowHighlights[row] : .none
+            let rowBackgroundColor: NSColor
+
+            switch rowHighlight {
+            case .none:
+                rowBackgroundColor = defaultBackgroundColor
+            case .pending:
+                rowBackgroundColor = defaultBackgroundColor.blended(
+                    withFraction: 0.78,
+                    of: pendingBackgroundColor
+                ) ?? pendingBackgroundColor
+            case .overdue:
+                rowBackgroundColor = defaultBackgroundColor.blended(
+                    withFraction: 0.72,
+                    of: overdueBackgroundColor
+                ) ?? overdueBackgroundColor
+            }
+
+            rowView.backgroundColor = rowBackgroundColor
+            rowView.needsDisplay = true
+        }
+    }
+
+    private static func findNearestTable(from view: NSView) -> NSTableView? {
+        var currentView: NSView? = view
+
+        while let candidate = currentView {
+            if let tableView = candidate as? NSTableView {
+                return tableView
+            }
+            if let tableView = firstTable(in: candidate) {
+                return tableView
+            }
+            currentView = candidate.superview
+        }
+
+        return nil
+    }
+
+    private static func firstTable(in view: NSView) -> NSTableView? {
+        if let tableView = view as? NSTableView {
+            return tableView
+        }
+
+        for subview in view.subviews {
+            if let tableView = firstTable(in: subview) {
+                return tableView
+            }
+        }
+
+        return nil
     }
 }
 

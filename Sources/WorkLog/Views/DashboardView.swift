@@ -300,7 +300,7 @@ private enum AppleIntelligenceTaskAnalyzer {
 }
 
 private enum TaskSnapshotHasher {
-    private static let insightVersion = "dashboard-insights-v6-compact-all-fields"
+    private static let insightVersion = "dashboard-insights-v8-planner-subtasks"
 
     static func hash(for entries: [WorkExperience]) -> String {
         stableHash("\(insightVersion)\u{1D}\(snapshot(for: entries))")
@@ -320,7 +320,12 @@ private enum TaskSnapshotHasher {
                     entry.feature,
                     entry.task,
                     entry.tags,
-                    String(entry.date.timeIntervalSince1970),
+                    String(entry.startDate.timeIntervalSince1970),
+                    String(entry.effectiveEndDate.timeIntervalSince1970),
+                    entry.plannerStatus.rawValue,
+                    entry.plannerProgressText,
+                    entry.plannerSnapshotText,
+                    entry.hasDateRange ? "range" : "single-day",
                     entry.situation,
                     entry.challenges,
                     entry.skillsUsed,
@@ -421,7 +426,12 @@ private enum FoundationModelsTaskAnalyzer {
 
     private static func taskSnapshot(from entries: [WorkExperience]) -> String {
         entries
-            .sorted { $0.date > $1.date }
+            .sorted { lhs, rhs in
+                if lhs.sortDate == rhs.sortDate {
+                    return lhs.startDate > rhs.startDate
+                }
+                return lhs.sortDate > rhs.sortDate
+            }
             .enumerated()
             .map { index, entry in
                 [
@@ -434,7 +444,11 @@ private enum FoundationModelsTaskAnalyzer {
                     "Feature=\(compact(entry.feature, limit: 45))",
                     "Task=\(compact(entry.task, limit: 70))",
                     "Tags=\(compact(entry.tags, limit: 90))",
-                    "Date=\(AppDateFormatters.short(entry.date))",
+                    "Dates=\(AppDateFormatters.range(start: entry.startDate, end: entry.endDate))",
+                    "PlanStatus=\(entry.plannerStatus.rawValue)",
+                    "PlanProgress=\(compact(entry.plannerProgressText, limit: 40))",
+                    "NextStep=\(compact(entry.plannerNextStepText ?? "None", limit: 70))",
+                    "Subtasks=\(compact(entry.plannerSnapshotText, limit: 140))",
                     "Situation=\(compact(entry.situation, limit: 110))",
                     "Challenges=\(compact(entry.challenges, limit: 110))",
                     "Skills=\(compact(entry.skillsUsed, limit: 90))",
@@ -673,7 +687,7 @@ private struct TaskInsights {
 
     private var recentEntries: [WorkExperience] {
         let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
-        return entries.filter { $0.date >= cutoff }
+        return entries.filter { $0.sortDate >= cutoff }
     }
 
     private var uniqueSkills: [String] {
@@ -701,7 +715,7 @@ private struct TaskInsights {
             .filter { $0.score >= 3 }
             .sorted {
                 if $0.score == $1.score {
-                    return $0.entry.date > $1.entry.date
+                    return $0.entry.sortDate > $1.entry.sortDate
                 }
                 return $0.score > $1.score
             }

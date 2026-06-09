@@ -4,7 +4,7 @@ Native macOS app for structured career tracking.
 
 ## V1 Scope
 
-- Tasks: table-first work log with company, designation, role, project/product, team, feature, task, searchable multiselect tags, date, situation, challenges, skills used, action, outcome, and learning.
+- Tasks: table-first work log with company, designation, role, project/product, team, feature, task, lightweight planner subtasks, searchable multiselect tags, date range, situation, challenges, skills used, action, outcome, and learning.
 - Interview Tracker: minimal company-role tracker with status, next action, due date, cooldown period input, calculated stage/last activity/eligible-again date/result/referral summary, optional referral details, interview rounds, and notes.
 - Documents: standalone document vault for resumes, offer letters, relieving letters, certificates, salary files, and other career documents. Documents are not linked to interview opportunities.
 - Settings: backup status, manual backup, restore latest backup, export JSON, and data folder shortcuts.
@@ -129,3 +129,5 @@ If iCloud Drive is unavailable, the app falls back to:
 ```text
 ~/Library/Application Support/Work Log/Backups/
 ```
+
+**This project is built using Codex by ChatGPT, OpenAI.**

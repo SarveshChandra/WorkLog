@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct WorkExperienceView: View {
@@ -5,6 +6,7 @@ struct WorkExperienceView: View {
     @State private var searchText = ""
     @State private var selectedTag = ""
     @State private var isEditing = false
+    @State private var taskListReferenceDay = Calendar.current.startOfDay(for: Date())
 
     private var entries: [WorkExperience] {
         let searchResults = store.filteredWorkExperiences(search: searchText)
@@ -27,6 +29,18 @@ struct WorkExperienceView: View {
         )
     }
 
+    private var rowHighlights: [TableRowHighlight] {
+        entries.map { entry in
+            if entry.isOverdueForTaskList(referenceDate: taskListReferenceDay) {
+                return .overdue
+            }
+            if !entry.isCompleteForTaskList {
+                return .pending
+            }
+            return .none
+        }
+    }
+
     private var selectionBinding: Binding<UUID?> {
         Binding(
             get: { store.selectedWorkID },
@@ -41,7 +55,7 @@ struct WorkExperienceView: View {
         VStack(spacing: 12) {
             PageHeader(
                 title: "Tasks",
-                subtitle: "Log essential work details, situation, challenges, action, outcome, and learning."
+                subtitle: "Plan work with subtasks and capture situation, challenges, action, outcome, and learning."
             ) {
                 SearchField(placeholder: "Search tasks", text: searchBinding)
                 Picker("Tags", selection: tagFilterBinding) {
@@ -70,53 +84,75 @@ struct WorkExperienceView: View {
             HStack(spacing: 0) {
                 Table(entries, selection: selectionBinding) {
                     TableColumn("Company") { entry in
-                        WorkExperienceTableText(entry.company)
+                        WorkExperienceTableCell {
+                            WorkExperienceTableText(entry.company)
+                        }
                     }
                     .width(min: 200, ideal: 240)
 
                     TableColumn("Designation") { entry in
-                        WorkExperienceTableText(entry.designation)
+                        WorkExperienceTableCell {
+                            WorkExperienceTableText(entry.designation)
+                        }
                     }
                     .width(min: 220, ideal: 260)
 
                     TableColumn("Role") { entry in
-                        WorkExperienceTableText(entry.role)
+                        WorkExperienceTableCell {
+                            WorkExperienceTableText(entry.role)
+                        }
                     }
                     .width(min: 220, ideal: 260)
 
                     TableColumn("Product / Project") { entry in
-                        WorkExperienceTableText(entry.projectProduct)
+                        WorkExperienceTableCell {
+                            WorkExperienceTableText(entry.projectProduct)
+                        }
                     }
                     .width(min: 240, ideal: 280)
 
                     TableColumn("Team") { entry in
-                        WorkExperienceTableText(entry.team)
+                        WorkExperienceTableCell {
+                            WorkExperienceTableText(entry.team)
+                        }
                     }
                     .width(min: 180, ideal: 220)
 
                     TableColumn("Feature") { entry in
-                        WorkExperienceTableText(entry.feature)
+                        WorkExperienceTableCell {
+                            WorkExperienceTableText(entry.feature)
+                        }
                     }
                     .width(min: 220, ideal: 260)
 
                     TableColumn("Task") { entry in
-                        WorkExperienceTableText(entry.task.isBlank ? "Untitled task" : entry.task)
+                        WorkExperienceTableCell {
+                            WorkExperienceTableText(entry.task.isBlank ? "Untitled task" : entry.task)
+                        }
                     }
                     .width(min: 320, ideal: 420)
 
+                    TableColumn("Duration") { entry in
+                        WorkExperienceTableCell {
+                            WorkExperienceTableText(AppDateFormatters.duration(start: entry.startDate, end: entry.endDate))
+                        }
+                    }
+                    .width(min: 110, ideal: 130)
+
                     TableColumn("Tags") { entry in
-                        WorkExperienceTagText(entry.tags, lineLimit: 1)
-                            .frame(height: WorkExperienceTableText.rowHeight, alignment: .center)
+                        WorkExperienceTableCell {
+                            WorkExperienceTagText(entry.tags, lineLimit: 1)
+                        }
                     }
                     .width(min: 300, ideal: 400)
-
-                    TableColumn("Date") { entry in
-                        WorkExperienceTableText(AppDateFormatters.short(entry.date))
-                    }
-                    .width(min: 110, ideal: 120)
                 }
                 .frame(minWidth: 0, maxWidth: .infinity)
-                .background(TableHeaderFontInstaller().frame(width: 0, height: 0))
+                .background(
+                    TableHeaderFontInstaller(
+                        rowHighlights: rowHighlights
+                    )
+                    .frame(width: 0, height: 0)
+                )
                 .id(store.selectedWorkID == nil ? "tasks-table-full" : "tasks-table-detail")
 
                 if let id = store.selectedWorkID,
@@ -141,6 +177,12 @@ struct WorkExperienceView: View {
         .padding(.bottom, 16)
         .onReceive(store.$data) { _ in
             reconcileSelection()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
+            refreshTaskListReferenceDay()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshTaskListReferenceDay()
         }
     }
 
@@ -171,6 +213,10 @@ struct WorkExperienceView: View {
         isEditing = false
     }
 
+    private func refreshTaskListReferenceDay(referenceDate: Date = Date()) {
+        taskListReferenceDay = Calendar.current.startOfDay(for: referenceDate)
+    }
+
     private func tags(in value: String) -> [String] {
         value
             .split(separator: ",")
@@ -185,6 +231,7 @@ private struct WorkExperienceDetailView: View {
     var availableSkillOptions: [String]
     var onDelete: () -> Void
     @State private var showDeleteConfirmation = false
+    @State private var selectedTab: WorkExperienceDetailTab = .overview
 
     var body: some View {
         ScrollView {
@@ -205,10 +252,23 @@ private struct WorkExperienceDetailView: View {
                     }
                 }
 
+                Picker("Detail", selection: $selectedTab) {
+                    ForEach(WorkExperienceDetailTab.allCases) { tab in
+                        Text(tab.rawValue).tag(tab)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .tint(.workLogSkyBlue)
+
                 if isEditing {
-                    WorkExperienceEditForm(entry: $entry, availableSkillOptions: availableSkillOptions)
+                    WorkExperienceEditForm(
+                        entry: $entry,
+                        availableSkillOptions: availableSkillOptions,
+                        selectedTab: selectedTab
+                    )
                 } else {
-                    WorkExperienceReadOnlyView(entry: entry)
+                    WorkExperienceReadOnlyView(entry: entry, selectedTab: selectedTab)
                 }
             }
             .padding(18)
@@ -226,8 +286,16 @@ private struct WorkExperienceDetailView: View {
     }
 }
 
+private enum WorkExperienceDetailTab: String, CaseIterable, Identifiable {
+    case overview = "Overview"
+    case subtasks = "Subtasks"
+
+    var id: String { rawValue }
+}
+
 private struct WorkExperienceReadOnlyView: View {
     var entry: WorkExperience
+    var selectedTab: WorkExperienceDetailTab
 
     private var formattedSkillsUsed: String {
         let skills = WorkExperienceSkillOptions.skills(in: entry.skillsUsed)
@@ -235,22 +303,34 @@ private struct WorkExperienceReadOnlyView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ReadOnlyDetailField(title: "Company", value: entry.company)
-            ReadOnlyDetailField(title: "Designation", value: entry.designation)
-            ReadOnlyDetailField(title: "Role", value: entry.role)
-            ReadOnlyDetailField(title: "Product / Project", value: entry.projectProduct)
-            ReadOnlyDetailField(title: "Team", value: entry.team)
-            ReadOnlyDetailField(title: "Feature", value: entry.feature)
-            ReadOnlyDetailField(title: "Task", value: entry.task)
-            ReadOnlyTagsField(value: entry.tags)
-            ReadOnlyDetailField(title: "Date", value: AppDateFormatters.short(entry.date), hideWhenEmpty: false)
-            ReadOnlyDetailField(title: "Situation", value: entry.situation, isLong: true)
-            ReadOnlyDetailField(title: "Challenges", value: entry.challenges, isLong: true)
-            ReadOnlyDetailField(title: "Skills Used", value: formattedSkillsUsed, isLong: true)
-            ReadOnlyDetailField(title: "Action", value: entry.action, isLong: true)
-            ReadOnlyDetailField(title: "Outcome", value: entry.outcome, isLong: true)
-            ReadOnlyDetailField(title: "Learning", value: entry.learning, isLong: true)
+        switch selectedTab {
+        case .overview:
+            VStack(alignment: .leading, spacing: 14) {
+                ReadOnlyDetailField(title: "Company", value: entry.company)
+                ReadOnlyDetailField(title: "Designation", value: entry.designation)
+                ReadOnlyDetailField(title: "Role", value: entry.role)
+                ReadOnlyDetailField(title: "Product / Project", value: entry.projectProduct)
+                ReadOnlyDetailField(title: "Team", value: entry.team)
+                ReadOnlyDetailField(title: "Feature", value: entry.feature)
+                ReadOnlyDetailField(title: "Situation", value: entry.situation, isLong: true)
+                ReadOnlyDetailField(title: "Task", value: entry.task)
+                ReadOnlyDetailField(title: "Expected Result", value: entry.expectedResult, isLong: true)
+                ReadOnlyDetailField(title: "Challenges", value: entry.challenges, isLong: true)
+                ReadOnlyDetailField(title: "Action", value: entry.action, isLong: true)
+                ReadOnlyDetailField(title: "Skills Used", value: formattedSkillsUsed, isLong: true)
+                ReadOnlyDetailField(title: "Outcome", value: entry.outcome, isLong: true)
+                ReadOnlyDetailField(title: "Learning", value: entry.learning, isLong: true)
+                ReadOnlyTagsField(value: entry.tags)
+                ReadOnlyDetailField(
+                    title: "Dates",
+                    value: AppDateFormatters.range(start: entry.startDate, end: entry.endDate),
+                    hideWhenEmpty: false
+                )
+            }
+        case .subtasks:
+            VStack(alignment: .leading, spacing: 14) {
+                WorkExperiencePlannerReadOnlySection(entry: entry)
+            }
         }
     }
 }
@@ -322,64 +402,109 @@ private struct WorkExperienceTableText: View {
         Text(value)
             .lineLimit(1)
             .truncationMode(.tail)
-            .frame(height: Self.rowHeight, alignment: .center)
+            .frame(maxWidth: .infinity, minHeight: Self.rowHeight, alignment: .leading)
+    }
+}
+
+private struct WorkExperienceTableCell<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 }
 
 private struct WorkExperienceEditForm: View {
     @Binding var entry: WorkExperience
     var availableSkillOptions: [String]
+    var selectedTab: WorkExperienceDetailTab
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            WorkFieldRow(title: "Company") {
-                TextField("Company", text: $entry.company)
+        switch selectedTab {
+        case .overview:
+            VStack(alignment: .leading, spacing: 14) {
+                WorkFieldRow(title: "Company") {
+                    TextField("Company", text: $entry.company)
+                }
+
+                WorkFieldRow(title: "Designation") {
+                    TextField("Designation", text: $entry.designation)
+                }
+
+                WorkFieldRow(title: "Role") {
+                    TextField("Role", text: $entry.role)
+                }
+
+                WorkFieldRow(title: "Product / Project") {
+                    TextField("Product or project", text: $entry.projectProduct)
+                }
+
+                WorkFieldRow(title: "Team") {
+                    TextField("Team", text: $entry.team)
+                }
+
+                WorkFieldRow(title: "Feature") {
+                    TextField("Feature", text: $entry.feature)
+                }
+
+                LabeledTextEditor(title: "Situation", text: $entry.situation, minHeight: 80)
+                WorkFieldRow(title: "Task") {
+                    TextField("Task", text: $entry.task)
+                }
+                LabeledTextEditor(title: "Expected Result", text: $entry.expectedResult, minHeight: 80)
+                LabeledTextEditor(title: "Challenges", text: $entry.challenges, minHeight: 80)
+                LabeledTextEditor(title: "Action", text: $entry.action, minHeight: 80)
+                WorkFieldRow(title: "Skills Used") {
+                    MultiSelectSkillPicker(
+                        skills: $entry.skillsUsed,
+                        allKnownSkills: availableSkillOptions
+                    )
+                }
+                LabeledTextEditor(title: "Outcome", text: $entry.outcome, minHeight: 80)
+                LabeledTextEditor(title: "Learning", text: $entry.learning, minHeight: 80)
+                WorkFieldRow(title: "Tags") {
+                    MultiSelectTagMenu(tags: $entry.tags)
+                }
+                WorkExperienceDateRangeEditor(entry: $entry)
+            }
+        case .subtasks:
+            VStack(alignment: .leading, spacing: 14) {
+                WorkExperiencePlannerEditor(entry: $entry)
+            }
+        }
+    }
+}
+
+private struct WorkExperiencePlannerReadOnlySection: View {
+    var entry: WorkExperience
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            WorkExperiencePlannerPaneSection {
+                ReadOnlyDetailField(title: "Approach", value: entry.approach, isLong: true)
             }
 
-            WorkFieldRow(title: "Designation") {
-                TextField("Designation", text: $entry.designation)
-            }
-
-            WorkFieldRow(title: "Role") {
-                TextField("Role", text: $entry.role)
-            }
-
-            WorkFieldRow(title: "Product / Project") {
-                TextField("Product or project", text: $entry.projectProduct)
-            }
-
-            WorkFieldRow(title: "Team") {
-                TextField("Team", text: $entry.team)
-            }
-
-            WorkFieldRow(title: "Feature") {
-                TextField("Feature", text: $entry.feature)
-            }
-
-            WorkFieldRow(title: "Task") {
-                TextField("Task", text: $entry.task)
-            }
-
-            WorkFieldRow(title: "Tags") {
-                MultiSelectTagMenu(tags: $entry.tags)
-            }
-
-            WorkFieldRow(title: "Date") {
-                DatePicker("", selection: $entry.date, displayedComponents: .date)
-                    .labelsHidden()
-            }
-
-            LabeledTextEditor(title: "Situation", text: $entry.situation, minHeight: 80)
-            LabeledTextEditor(title: "Challenges", text: $entry.challenges, minHeight: 80)
-            WorkFieldRow(title: "Skills Used") {
-                MultiSelectSkillPicker(
-                    skills: $entry.skillsUsed,
-                    allKnownSkills: availableSkillOptions
+            WorkExperiencePlannerPaneSection {
+                WorkExperiencePlannerSummaryView(
+                    entry: entry,
+                    emptyMessage: "No subtasks yet. Use Edit to add a simple checklist."
                 )
+
+                if !entry.orderedSubtasks.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(entry.orderedSubtasks) { subtask in
+                            WorkExperiencePlannerReadOnlyRow(subtask: subtask)
+                        }
+                    }
+                }
             }
-            LabeledTextEditor(title: "Action", text: $entry.action, minHeight: 80)
-            LabeledTextEditor(title: "Outcome", text: $entry.outcome, minHeight: 80)
-            LabeledTextEditor(title: "Learning", text: $entry.learning, minHeight: 80)
+
+            WorkExperiencePlannerPaneSection {
+                ReadOnlyDetailField(title: "Expected Result", value: entry.expectedResult, isLong: true)
+            }
         }
     }
 }
@@ -394,6 +519,367 @@ private struct WorkFieldRow<Content: View>: View {
                 .font(.callout)
                 .foregroundStyle(.workLogHeaderText)
             content
+        }
+    }
+}
+
+private struct WorkExperiencePlannerEditor: View {
+    @Binding var entry: WorkExperience
+    @State private var newSubtaskTitle = ""
+
+    private var trimmedDraftTitle: String {
+        newSubtaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WorkExperiencePlannerPaneSection {
+                LabeledTextEditor(title: "Approach", text: $entry.approach, minHeight: 90)
+            }
+
+            WorkExperiencePlannerPaneSection {
+                WorkExperiencePlannerSummaryView(
+                    entry: entry,
+                    emptyMessage: "Add subtasks to turn this task into a simple checklist."
+                )
+
+                if entry.subtasks.isEmpty {
+                    Text("No subtasks yet.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(entry.subtasks.indices), id: \.self) { index in
+                            WorkExperiencePlannerSubtaskRow(
+                                subtask: $entry.subtasks[index],
+                                minimumDueDate: entry.startDate,
+                                maximumDueDate: entry.endDate,
+                                canMoveUp: index > 0,
+                                canMoveDown: index < entry.subtasks.count - 1,
+                                onMoveUp: { moveSubtask(from: index, direction: -1) },
+                                onMoveDown: { moveSubtask(from: index, direction: 1) },
+                                onDelete: { deleteSubtask(at: index) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            WorkExperiencePlannerPaneSection {
+                VStack(alignment: .leading, spacing: 10) {
+                    WorkExperiencePlannerTextEditor(
+                        placeholder: "Add subtask",
+                        text: $newSubtaskTitle,
+                        minHeight: 72
+                    )
+
+                    HStack {
+                        Spacer()
+                        Button {
+                            addSubtask()
+                        } label: {
+                            Label("Add", systemImage: "plus")
+                        }
+                        .disabled(trimmedDraftTitle.isEmpty)
+                    }
+                }
+            }
+
+            WorkExperiencePlannerPaneSection {
+                ReadOnlyDetailField(title: "Expected Result", value: entry.expectedResult, isLong: true)
+            }
+        }
+    }
+
+    private func addSubtask() {
+        guard !trimmedDraftTitle.isEmpty else { return }
+
+        entry.subtasks.append(
+            WorkExperienceSubtask(
+                title: trimmedDraftTitle,
+                status: .todo,
+                dueDate: entry.endDate,
+                order: entry.subtasks.count
+            )
+        )
+        entry.reindexPlannerSubtasksInCurrentOrder()
+        newSubtaskTitle = ""
+    }
+
+    private func moveSubtask(from index: Int, direction: Int) {
+        let destination = index + direction
+        guard entry.subtasks.indices.contains(index),
+              entry.subtasks.indices.contains(destination) else {
+            return
+        }
+
+        let subtask = entry.subtasks.remove(at: index)
+        entry.subtasks.insert(subtask, at: destination)
+        entry.reindexPlannerSubtasksInCurrentOrder()
+    }
+
+    private func deleteSubtask(at index: Int) {
+        guard entry.subtasks.indices.contains(index) else { return }
+        entry.subtasks.remove(at: index)
+        entry.reindexPlannerSubtasksInCurrentOrder()
+    }
+}
+
+private struct WorkExperiencePlannerPaneSection<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            content
+        }
+        .padding(14)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.primary.opacity(0.06))
+        }
+    }
+}
+
+private struct WorkExperiencePlannerSummaryView: View {
+    var entry: WorkExperience
+    var emptyMessage: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                WorkExperiencePlannerStatusChip(status: entry.plannerStatus)
+                Text(entry.plannerProgressText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            if entry.totalSubtaskCount == 0 {
+                Text(emptyMessage)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if entry.plannerStatus == .done {
+                Text("All subtasks are done.")
+                    .font(.callout)
+                    .foregroundStyle(.primary.opacity(0.82))
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let nextStep = entry.plannerNextStepText {
+                Text("Next step: \(nextStep)")
+                    .font(.callout)
+                    .foregroundStyle(.primary.opacity(0.82))
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                EmptyView()
+            }
+        }
+    }
+}
+
+private struct WorkExperiencePlannerReadOnlyRow: View {
+    var subtask: WorkExperienceSubtask
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text("\(subtask.order + 1).")
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(width: 22, alignment: .trailing)
+
+            Image(systemName: subtask.status.systemImage)
+                .foregroundStyle(subtask.status.tint)
+                .frame(width: 16)
+
+            Text(subtask.displayTitle)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 12)
+
+            Text("Due \(AppDateFormatters.short(subtask.dueDate))")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct WorkExperiencePlannerSubtaskRow: View {
+    @Binding var subtask: WorkExperienceSubtask
+    var minimumDueDate: Date
+    var maximumDueDate: Date
+    var canMoveUp: Bool
+    var canMoveDown: Bool
+    var onMoveUp: () -> Void
+    var onMoveDown: () -> Void
+    var onDelete: () -> Void
+
+    private var dueDateBinding: Binding<Date> {
+        Binding(
+            get: { min(max(subtask.dueDate, minimumDueDate), maximumDueDate) },
+            set: { newValue in
+                subtask.dueDate = min(max(newValue, minimumDueDate), maximumDueDate)
+            }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
+                Text("\(subtask.order + 1).")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, alignment: .trailing)
+
+                Menu {
+                    ForEach(WorkExperienceSubtaskStatus.allCases, id: \.self) { status in
+                        Button {
+                            subtask.status = status
+                        } label: {
+                            Label(status.rawValue, systemImage: status.systemImage)
+                        }
+                    }
+                } label: {
+                    WorkExperiencePlannerStatusChip(status: subtask.status)
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 8)
+
+                Button(action: onMoveUp) {
+                    Image(systemName: "arrow.up")
+                        .frame(width: 16)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(canMoveUp ? Color.primary.opacity(0.8) : Color.secondary.opacity(0.35))
+                .disabled(!canMoveUp)
+
+                Button(action: onMoveDown) {
+                    Image(systemName: "arrow.down")
+                        .frame(width: 16)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(canMoveDown ? Color.primary.opacity(0.8) : Color.secondary.opacity(0.35))
+                .disabled(!canMoveDown)
+
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
+                        .frame(width: 16)
+                }
+                .buttonStyle(.plain)
+            }
+
+            WorkExperiencePlannerTextEditor(
+                placeholder: "Subtask",
+                text: $subtask.title,
+                minHeight: 78
+            )
+
+            HStack {
+                Text("Due")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                DatePicker(
+                    "",
+                    selection: dueDateBinding,
+                    in: minimumDueDate...maximumDueDate,
+                    displayedComponents: .date
+                )
+                    .labelsHidden()
+            }
+            .font(.caption)
+        }
+    }
+}
+
+private struct WorkExperiencePlannerTextEditor: View {
+    var placeholder: String
+    @Binding var text: String
+    var minHeight: CGFloat
+
+    private var isEmpty: Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if isEmpty {
+                Text(placeholder)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 12)
+            }
+
+            TextEditor(text: $text)
+                .font(.body)
+                .frame(minHeight: minHeight)
+                .padding(4)
+                .scrollContentBackground(.hidden)
+        }
+        .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 6))
+        .overlay {
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(.quaternary)
+        }
+    }
+}
+
+private struct WorkExperiencePlannerStatusChip: View {
+    var status: WorkExperienceSubtaskStatus
+
+    var body: some View {
+        Label(status.rawValue, systemImage: status.systemImage)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(status.tint)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(status.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+    }
+}
+
+private struct WorkExperienceDateRangeEditor: View {
+    @Binding var entry: WorkExperience
+
+    private var startDateBinding: Binding<Date> {
+        Binding(
+            get: { entry.startDate },
+            set: { newValue in
+                entry.startDate = newValue
+                entry.normalizeDateRange()
+                entry.normalizePlannerSubtasks()
+            }
+        )
+    }
+
+    private var endDateBinding: Binding<Date> {
+        Binding(
+            get: { entry.endDate },
+            set: { newValue in
+                entry.endDate = newValue
+                entry.normalizeDateRange()
+                entry.normalizePlannerSubtasks()
+            }
+        )
+    }
+
+    var body: some View {
+        WorkFieldRow(title: "Dates") {
+            VStack(alignment: .leading, spacing: 10) {
+                datePickerRow(title: "Start", selection: startDateBinding)
+                datePickerRow(title: "Due", selection: endDateBinding)
+
+                Text(AppDateFormatters.range(start: entry.startDate, end: entry.endDate))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func datePickerRow(title: String, selection: Binding<Date>) -> some View {
+        HStack {
+            Text(title)
+                .foregroundStyle(.secondary)
+            Spacer()
+            DatePicker("", selection: selection, displayedComponents: .date)
+                .labelsHidden()
         }
     }
 }
@@ -679,6 +1165,34 @@ enum WorkExperienceTagOptions {
 
     static func isPositive(_ tag: String) -> Bool {
         positiveTags.contains(tag)
+    }
+}
+
+private extension WorkExperienceSubtaskStatus {
+    var systemImage: String {
+        switch self {
+        case .todo:
+            return "circle"
+        case .doing:
+            return "play.circle.fill"
+        case .blocked:
+            return "exclamationmark.triangle.fill"
+        case .done:
+            return "checkmark.circle.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .todo:
+            return .secondary
+        case .doing:
+            return .workLogDoingYellow
+        case .blocked:
+            return .orange
+        case .done:
+            return .workLogIconGreen
+        }
     }
 }
 

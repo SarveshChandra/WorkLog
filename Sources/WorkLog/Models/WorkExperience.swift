@@ -1,5 +1,87 @@
 import Foundation
 
+struct WorkExperienceSubtask: Identifiable, Codable, Hashable {
+    var id: UUID = UUID()
+    var title: String = ""
+    var status: WorkExperienceSubtaskStatus = .todo
+    var dueDate: Date = Date()
+    var order: Int = 0
+    fileprivate var needsDueDateBackfill = false
+
+    init(
+        id: UUID = UUID(),
+        title: String = "",
+        status: WorkExperienceSubtaskStatus = .todo,
+        dueDate: Date = Date(),
+        order: Int = 0
+    ) {
+        self.id = id
+        self.title = title
+        self.status = status
+        self.dueDate = dueDate
+        self.order = order
+    }
+
+    static func == (lhs: WorkExperienceSubtask, rhs: WorkExperienceSubtask) -> Bool {
+        lhs.id == rhs.id
+            && lhs.title == rhs.title
+            && lhs.status == rhs.status
+            && lhs.dueDate == rhs.dueDate
+            && lhs.order == rhs.order
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(title)
+        hasher.combine(status)
+        hasher.combine(dueDate)
+        hasher.combine(order)
+    }
+
+    var displayTitle: String {
+        title.isBlank ? "Untitled subtask" : title
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case status
+        case dueDate
+        case order
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
+        status = try container.decodeIfPresent(WorkExperienceSubtaskStatus.self, forKey: .status) ?? .todo
+        let hasDueDate = container.contains(.dueDate)
+        dueDate = try container.decodeIfPresent(Date.self, forKey: .dueDate) ?? Date()
+        order = try container.decodeIfPresent(Int.self, forKey: .order) ?? 0
+        needsDueDateBackfill = !hasDueDate
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(status, forKey: .status)
+        try container.encode(dueDate, forKey: .dueDate)
+        try container.encode(order, forKey: .order)
+    }
+}
+
+enum WorkExperienceSubtaskStatus: String, Codable, CaseIterable, Hashable {
+    case todo = "Todo"
+    case doing = "Doing"
+    case blocked = "Blocked"
+    case done = "Done"
+
+    var isDone: Bool {
+        self == .done
+    }
+}
+
 struct WorkExperience: Identifiable, Codable, Hashable {
     var id: UUID = UUID()
     var company: String = ""
@@ -10,13 +92,17 @@ struct WorkExperience: Identifiable, Codable, Hashable {
     var feature: String = ""
     var task: String = ""
     var tags: String = ""
-    var date: Date = Date()
+    var startDate: Date = Date()
+    var endDate: Date = Date()
+    var subtasks: [WorkExperienceSubtask] = []
     var situation: String = ""
+    var expectedResult: String = ""
     var action: String = ""
     var outcome: String = ""
     var challenges: String = ""
     var skillsUsed: String = ""
     var learning: String = ""
+    var approach: String = ""
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
 
@@ -30,13 +116,17 @@ struct WorkExperience: Identifiable, Codable, Hashable {
         feature: String = "",
         task: String = "",
         tags: String = "",
-        date: Date = Date(),
+        startDate: Date = Date(),
+        endDate: Date = Date(),
+        subtasks: [WorkExperienceSubtask] = [],
         situation: String = "",
+        expectedResult: String = "",
         action: String = "",
         outcome: String = "",
         challenges: String = "",
         skillsUsed: String = "",
         learning: String = "",
+        approach: String = "",
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -49,13 +139,23 @@ struct WorkExperience: Identifiable, Codable, Hashable {
         self.feature = feature
         self.task = task
         self.tags = tags
-        self.date = date
+        let normalizedRange = Self.normalizedDateRange(start: startDate, end: endDate)
+        self.startDate = normalizedRange.start
+        self.endDate = normalizedRange.end
+        self.subtasks = Self.normalizedSubtasks(
+            subtasks,
+            fallbackDueDate: normalizedRange.end,
+            minimumDueDate: normalizedRange.start,
+            maximumDueDate: normalizedRange.end
+        )
         self.situation = situation
+        self.expectedResult = expectedResult
         self.action = action
         self.outcome = outcome
         self.challenges = challenges
         self.skillsUsed = skillsUsed
         self.learning = learning
+        self.approach = approach
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -70,14 +170,19 @@ struct WorkExperience: Identifiable, Codable, Hashable {
         case feature
         case task
         case tags
+        case startDate
+        case endDate
+        case subtasks
         case date
         case situation
+        case expectedResult
         case action
         case outcome
         case impact
         case challenges
         case skillsUsed
         case learning
+        case approach
         case createdAt
         case updatedAt
     }
@@ -93,8 +198,20 @@ struct WorkExperience: Identifiable, Codable, Hashable {
         feature = try container.decodeIfPresent(String.self, forKey: .feature) ?? ""
         task = try container.decodeIfPresent(String.self, forKey: .task) ?? ""
         tags = try container.decodeIfPresent(String.self, forKey: .tags) ?? ""
-        date = try container.decodeIfPresent(Date.self, forKey: .date) ?? Date()
+        let legacyDate = try container.decodeIfPresent(Date.self, forKey: .date)
+        let decodedStartDate = try container.decodeIfPresent(Date.self, forKey: .startDate) ?? legacyDate ?? Date()
+        let decodedEndDate = try container.decodeIfPresent(Date.self, forKey: .endDate) ?? decodedStartDate
+        let normalizedRange = Self.normalizedDateRange(start: decodedStartDate, end: decodedEndDate)
+        startDate = normalizedRange.start
+        endDate = normalizedRange.end
+        subtasks = Self.normalizedSubtasks(
+            try container.decodeIfPresent([WorkExperienceSubtask].self, forKey: .subtasks) ?? [],
+            fallbackDueDate: normalizedRange.end,
+            minimumDueDate: normalizedRange.start,
+            maximumDueDate: normalizedRange.end
+        )
         situation = try container.decodeIfPresent(String.self, forKey: .situation) ?? ""
+        expectedResult = try container.decodeIfPresent(String.self, forKey: .expectedResult) ?? ""
         action = try container.decodeIfPresent(String.self, forKey: .action) ?? ""
         outcome = try container.decodeIfPresent(String.self, forKey: .outcome)
             ?? container.decodeIfPresent(String.self, forKey: .impact)
@@ -102,6 +219,7 @@ struct WorkExperience: Identifiable, Codable, Hashable {
         challenges = try container.decodeIfPresent(String.self, forKey: .challenges) ?? ""
         skillsUsed = try container.decodeIfPresent(String.self, forKey: .skillsUsed) ?? ""
         learning = try container.decodeIfPresent(String.self, forKey: .learning) ?? ""
+        approach = try container.decodeIfPresent(String.self, forKey: .approach) ?? ""
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
     }
@@ -117,13 +235,27 @@ struct WorkExperience: Identifiable, Codable, Hashable {
         try container.encode(feature, forKey: .feature)
         try container.encode(task, forKey: .task)
         try container.encode(tags, forKey: .tags)
-        try container.encode(date, forKey: .date)
+        let normalizedRange = Self.normalizedDateRange(start: startDate, end: endDate)
+        try container.encode(normalizedRange.start, forKey: .startDate)
+        try container.encode(normalizedRange.end, forKey: .endDate)
+        try container.encode(
+            Self.normalizedSubtasks(
+                subtasks,
+                fallbackDueDate: normalizedRange.end,
+                minimumDueDate: normalizedRange.start,
+                maximumDueDate: normalizedRange.end
+            ),
+            forKey: .subtasks
+        )
+        try container.encode(normalizedRange.start, forKey: .date)
         try container.encode(situation, forKey: .situation)
+        try container.encode(expectedResult, forKey: .expectedResult)
         try container.encode(action, forKey: .action)
         try container.encode(outcome, forKey: .outcome)
         try container.encode(challenges, forKey: .challenges)
         try container.encode(skillsUsed, forKey: .skillsUsed)
         try container.encode(learning, forKey: .learning)
+        try container.encode(approach, forKey: .approach)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(updatedAt, forKey: .updatedAt)
     }
@@ -138,14 +270,182 @@ struct WorkExperience: Identifiable, Codable, Hashable {
             feature,
             task,
             tags,
+            subtasks.map(\.displayTitle).joined(separator: " "),
             situation,
+            expectedResult,
             challenges,
             skillsUsed,
             action,
             outcome,
-            learning
+            learning,
+            approach
         ]
         .joined(separator: " ")
+    }
+
+    var effectiveEndDate: Date {
+        endDate
+    }
+
+    var sortDate: Date {
+        effectiveEndDate
+    }
+
+    var hasDateRange: Bool {
+        !Calendar.current.isDate(startDate, inSameDayAs: endDate)
+    }
+
+    var orderedSubtasks: [WorkExperienceSubtask] {
+        Self.normalizedSubtasks(
+            subtasks,
+            fallbackDueDate: endDate,
+            minimumDueDate: startDate,
+            maximumDueDate: endDate
+        )
+    }
+
+    var totalSubtaskCount: Int {
+        orderedSubtasks.count
+    }
+
+    var completedSubtaskCount: Int {
+        orderedSubtasks.filter { $0.status.isDone }.count
+    }
+
+    var plannerStatus: WorkExperienceSubtaskStatus {
+        guard !orderedSubtasks.isEmpty else { return .todo }
+        if completedSubtaskCount == totalSubtaskCount {
+            return .done
+        }
+        if orderedSubtasks.contains(where: { $0.status == .blocked }) {
+            return .blocked
+        }
+        if orderedSubtasks.contains(where: { $0.status == .doing }) || completedSubtaskCount > 0 {
+            return .doing
+        }
+        return .todo
+    }
+
+    var nextSubtask: WorkExperienceSubtask? {
+        orderedSubtasks.first { !$0.status.isDone }
+    }
+
+    var plannerProgressText: String {
+        guard totalSubtaskCount > 0 else { return "No subtasks yet" }
+        return "\(completedSubtaskCount) of \(totalSubtaskCount) done"
+    }
+
+    var plannerNextStepText: String? {
+        nextSubtask?.displayTitle
+    }
+
+    var plannerListSummary: String {
+        guard totalSubtaskCount > 0 else { return "No plan yet" }
+        let summary = "\(plannerStatus.rawValue) | \(completedSubtaskCount)/\(totalSubtaskCount)"
+        guard let nextSubtask else {
+            return summary
+        }
+        return "\(summary) | \(nextSubtask.displayTitle)"
+    }
+
+    var plannerSnapshotText: String {
+        guard totalSubtaskCount > 0 else { return "No subtasks" }
+        return orderedSubtasks
+            .map { subtask in
+                "\(subtask.order + 1). \(subtask.status.rawValue), due \(AppDateFormatters.short(subtask.dueDate)): \(subtask.displayTitle)"
+            }
+            .joined(separator: "; ")
+    }
+
+    var hasCompleteSTARFields: Bool {
+        !task.isBlank
+            && !situation.isBlank
+            && !action.isBlank
+            && !outcome.isBlank
+    }
+
+    var hasCompletedAllSubtasks: Bool {
+        totalSubtaskCount == 0 || completedSubtaskCount == totalSubtaskCount
+    }
+
+    var isCompleteForTaskList: Bool {
+        hasCompleteSTARFields && hasCompletedAllSubtasks
+    }
+
+    var isOverdueForTaskList: Bool {
+        isOverdueForTaskList(referenceDate: Date())
+    }
+
+    func isOverdueForTaskList(referenceDate: Date) -> Bool {
+        guard !isCompleteForTaskList else { return false }
+
+        let calendar = Calendar.current
+        let dueDay = calendar.startOfDay(for: endDate)
+        let today = calendar.startOfDay(for: referenceDate)
+        return dueDay < today
+    }
+
+    mutating func normalizeDateRange() {
+        let normalizedRange = Self.normalizedDateRange(start: startDate, end: endDate)
+        startDate = normalizedRange.start
+        endDate = normalizedRange.end
+    }
+
+    mutating func normalizePlannerSubtasks() {
+        subtasks = Self.normalizedSubtasks(
+            subtasks,
+            fallbackDueDate: endDate,
+            minimumDueDate: startDate,
+            maximumDueDate: endDate
+        )
+    }
+
+    mutating func reindexPlannerSubtasksInCurrentOrder() {
+        subtasks = subtasks.enumerated().map { index, subtask in
+            var updatedSubtask = subtask
+            updatedSubtask.order = index
+            return updatedSubtask
+        }
+    }
+
+    private static func normalizedDateRange(start: Date, end: Date) -> (start: Date, end: Date) {
+        if end < start {
+            return (start, start)
+        }
+
+        return (start, end)
+    }
+
+    private static func normalizedSubtasks(
+        _ subtasks: [WorkExperienceSubtask],
+        fallbackDueDate: Date? = nil,
+        minimumDueDate: Date? = nil,
+        maximumDueDate: Date? = nil
+    ) -> [WorkExperienceSubtask] {
+        subtasks
+            .enumerated()
+            .sorted { lhs, rhs in
+                if lhs.element.order == rhs.element.order {
+                    return lhs.offset < rhs.offset
+                }
+                return lhs.element.order < rhs.element.order
+            }
+            .enumerated()
+            .map { normalizedIndex, pair in
+                var subtask = pair.element
+                subtask.order = normalizedIndex
+                if subtask.needsDueDateBackfill {
+                    subtask.dueDate = fallbackDueDate ?? subtask.dueDate
+                    subtask.needsDueDateBackfill = false
+                }
+                if let minimumDueDate, subtask.dueDate < minimumDueDate {
+                    subtask.dueDate = minimumDueDate
+                }
+                if let maximumDueDate, subtask.dueDate > maximumDueDate {
+                    subtask.dueDate = maximumDueDate
+                }
+                return subtask
+            }
     }
 }
 

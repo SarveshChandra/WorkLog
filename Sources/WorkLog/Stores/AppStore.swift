@@ -89,6 +89,8 @@ final class AppStore: ObservableObject {
             set: { newValue in
                 guard let index = self.data.workExperiences.firstIndex(where: { $0.id == id }) else { return }
                 var updated = newValue
+                updated.normalizeDateRange()
+                updated.normalizePlannerSubtasks()
                 updated.updatedAt = Date()
                 self.data.workExperiences[index] = updated
                 self.save()
@@ -99,10 +101,13 @@ final class AppStore: ObservableObject {
     func filteredWorkExperiences(search: String) -> [WorkExperience] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         let sorted = data.workExperiences.sorted { lhs, rhs in
-            if lhs.date == rhs.date {
-                return lhs.updatedAt > rhs.updatedAt
+            if lhs.sortDate == rhs.sortDate {
+                if lhs.startDate == rhs.startDate {
+                    return lhs.updatedAt > rhs.updatedAt
+                }
+                return lhs.startDate > rhs.startDate
             }
-            return lhs.date > rhs.date
+            return lhs.sortDate > rhs.sortDate
         }
 
         guard !query.isEmpty else { return sorted }
@@ -589,51 +594,96 @@ final class AppStore: ObservableObject {
         var changed = false
 
         for index in data.workExperiences.indices {
-            let task = data.workExperiences[index].task
-
-            guard data.workExperiences[index].company.isBlank,
-                  data.workExperiences[index].designation.isBlank,
-                  data.workExperiences[index].role.isBlank else {
+            guard let demoEntry = DemoDataFactory.demoWorkExperience(for: data.workExperiences[index].task) else {
                 continue
             }
-
-            switch task {
-            case "Reduced dashboard load time":
-                data.workExperiences[index].company = "Acme Systems"
-                data.workExperiences[index].designation = "Senior Software Engineer"
-                data.workExperiences[index].role = "macOS Platform Engineer"
-                data.workExperiences[index].tags = "Performance Improvement, High Impact, Cross-team Work"
-                data.workExperiences[index].situation = "Weekly reporting users were waiting too long for the dashboard to become usable."
-                data.workExperiences[index].action = "Profiled the load path, removed over-fetching, added pagination, and cached stable summary data."
-                changed = true
-            case "Built release checklist automation":
-                data.workExperiences[index].company = "Acme Systems"
-                data.workExperiences[index].designation = "Software Engineer"
-                data.workExperiences[index].role = "Developer Experience Engineer"
-                data.workExperiences[index].tags = "Automation, Process Improvement, High Impact"
-                data.workExperiences[index].situation = "Release readiness checks were spread across docs, chat, and manual memory."
-                data.workExperiences[index].action = "Built a lightweight checklist validator for release owners and connected it to CI checks."
-                changed = true
-            case "Documented onboarding flow":
-                data.workExperiences[index].company = "Acme Systems"
-                data.workExperiences[index].designation = "Software Engineer"
-                data.workExperiences[index].role = "Product Engineer"
-                data.workExperiences[index].tags = "Documentation, Team Enablement"
-                data.workExperiences[index].situation = "New engineers had to piece together setup steps from multiple sources."
-                data.workExperiences[index].action = "Mapped the onboarding flow, validated it with a new joiner, and documented ownership boundaries."
-                changed = true
-            default:
-                continue
-            }
+            changed = mergeMissingDemoWorkExperienceFields(
+                at: index,
+                from: demoEntry
+            ) || changed
         }
 
         if changed {
             do {
                 try persistence.save(data)
-                statusMessage = "Updated demo work logs for the latest Work Experience fields."
+                statusMessage = "Updated demo work logs for the latest task fields, planner subtasks, and due dates."
             } catch {
                 statusMessage = "Work log demo migration failed: \(error.localizedDescription)"
             }
+        }
+    }
+
+    private func mergeMissingDemoWorkExperienceFields(at index: Int, from demoEntry: WorkExperience) -> Bool {
+        var entry = data.workExperiences[index]
+        var changed = false
+
+        func fill(_ keyPath: WritableKeyPath<WorkExperience, String>, with value: String) {
+            guard entry[keyPath: keyPath].isBlank, !value.isBlank else { return }
+            entry[keyPath: keyPath] = value
+            changed = true
+        }
+
+        if entry.subtasks.isEmpty, !demoEntry.subtasks.isEmpty {
+            entry.subtasks = demoEntry.subtasks
+            changed = true
+        } else if shouldRefreshDemoSubtaskDueDates(entry, using: demoEntry) {
+            entry.subtasks = plannerSubtasksWithGeneratedDueDates(entry.subtasks, endingOn: entry.endDate)
+            changed = true
+        }
+
+        fill(\.company, with: demoEntry.company)
+        fill(\.designation, with: demoEntry.designation)
+        fill(\.role, with: demoEntry.role)
+        fill(\.projectProduct, with: demoEntry.projectProduct)
+        fill(\.team, with: demoEntry.team)
+        fill(\.feature, with: demoEntry.feature)
+        fill(\.tags, with: demoEntry.tags)
+        fill(\.situation, with: demoEntry.situation)
+        fill(\.expectedResult, with: demoEntry.expectedResult)
+        fill(\.action, with: demoEntry.action)
+        fill(\.outcome, with: demoEntry.outcome)
+        fill(\.challenges, with: demoEntry.challenges)
+        fill(\.skillsUsed, with: demoEntry.skillsUsed)
+        fill(\.learning, with: demoEntry.learning)
+        fill(\.approach, with: demoEntry.approach)
+
+        if changed {
+            data.workExperiences[index] = entry
+        }
+
+        return changed
+    }
+
+    private func shouldRefreshDemoSubtaskDueDates(
+        _ entry: WorkExperience,
+        using demoEntry: WorkExperience
+    ) -> Bool {
+        let entrySubtasks = entry.orderedSubtasks
+        let demoSubtasks = demoEntry.orderedSubtasks
+        guard !entrySubtasks.isEmpty,
+              entrySubtasks.count == demoSubtasks.count,
+              entrySubtasks.map(\.displayTitle) == demoSubtasks.map(\.displayTitle) else {
+            return false
+        }
+
+        return entrySubtasks.allSatisfy { subtask in
+            Calendar.current.isDate(subtask.dueDate, inSameDayAs: entry.endDate)
+        }
+    }
+
+    private func plannerSubtasksWithGeneratedDueDates(
+        _ subtasks: [WorkExperienceSubtask],
+        endingOn taskDueDate: Date
+    ) -> [WorkExperienceSubtask] {
+        let finalIndex = max(subtasks.count - 1, 0)
+        return subtasks.enumerated().map { index, subtask in
+            var updatedSubtask = subtask
+            updatedSubtask.dueDate = Calendar.current.date(
+                byAdding: .day,
+                value: index - finalIndex,
+                to: taskDueDate
+            ) ?? taskDueDate
+            return updatedSubtask
         }
     }
 
