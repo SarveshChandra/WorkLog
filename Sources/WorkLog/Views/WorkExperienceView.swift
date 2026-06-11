@@ -6,14 +6,13 @@ struct WorkExperienceView: View {
     @State private var searchText = ""
     @State private var selectedTag = ""
     @State private var isEditing = false
+    @State private var showCloseEditingConfirmation = false
+    @State private var pendingSearchText: String?
+    @State private var pendingSelectedTag: String?
     @State private var taskListReferenceDay = Calendar.current.startOfDay(for: Date())
 
     private var entries: [WorkExperience] {
-        let searchResults = store.filteredWorkExperiences(search: searchText)
-        guard !selectedTag.isEmpty else { return searchResults }
-        return searchResults.filter { entry in
-            tags(in: entry.tags).contains(selectedTag)
-        }
+        filteredEntries(search: searchText, tag: selectedTag)
     }
 
     private var availableTags: [String] {
@@ -56,10 +55,37 @@ struct WorkExperienceView: View {
         }
     }
 
+    private var outlinedRowIndex: Int? {
+        guard let selectedID = store.selectedWorkID else { return nil }
+        return entries.firstIndex { $0.id == selectedID }
+    }
+
+    private var tableLayoutSignature: Int {
+        var hasher = Hasher()
+        hasher.combine(entries.count)
+        for entry in entries {
+            hasher.combine(entry.id)
+            hasher.combine(entry.company)
+            hasher.combine(entry.designation)
+            hasher.combine(entry.role)
+            hasher.combine(entry.projectProduct)
+            hasher.combine(entry.team)
+            hasher.combine(entry.feature)
+            hasher.combine(entry.task)
+            hasher.combine(entry.durationText)
+            hasher.combine(entry.tags)
+        }
+        return hasher.finalize()
+    }
+
     private var selectionBinding: Binding<UUID?> {
         Binding(
             get: { store.selectedWorkID },
             set: { newValue in
+                if newValue == nil, isEditing, store.selectedWorkID != nil {
+                    showCloseEditingConfirmation = true
+                    return
+                }
                 store.selectedWorkID = newValue
                 isEditing = false
             }
@@ -85,106 +111,112 @@ struct WorkExperienceView: View {
                 .frame(width: 180)
                 .opacity(selectedTag.isEmpty ? 0.62 : 1)
 
-                Button {
+                IconOnlyActionButton("Add", systemImage: "plus") {
                     searchText = ""
                     selectedTag = ""
                     store.addWorkExperience()
                     isEditing = true
-                } label: {
-                    Label("Add", systemImage: "plus")
-                        .foregroundStyle(.secondary)
+                }
+
+                IconOnlyActionButton("Import Tasks", systemImage: "square.and.arrow.down") {
+                    searchText = ""
+                    selectedTag = ""
+                    store.importWorkExperiences()
+                    isEditing = false
                 }
             }
 
-            HStack(spacing: 0) {
+            StableDetailPaneLayout(showsDetail: store.selectedWorkID != nil) {
                 Table(entries, selection: selectionBinding) {
                     TableColumn("Company") { entry in
                         WorkExperienceTableCell {
                             WorkExperienceTableText(entry.company)
                         }
                     }
-                    .width(min: 200, ideal: 240)
+                    .width(240)
 
                     TableColumn("Designation") { entry in
                         WorkExperienceTableCell {
                             WorkExperienceTableText(entry.designation)
                         }
                     }
-                    .width(min: 220, ideal: 260)
+                    .width(260)
 
                     TableColumn("Role") { entry in
                         WorkExperienceTableCell {
                             WorkExperienceTableText(entry.role)
                         }
                     }
-                    .width(min: 220, ideal: 260)
+                    .width(260)
 
                     TableColumn("Product / Project") { entry in
                         WorkExperienceTableCell {
                             WorkExperienceTableText(entry.projectProduct)
                         }
                     }
-                    .width(min: 240, ideal: 280)
+                    .width(280)
 
                     TableColumn("Team") { entry in
                         WorkExperienceTableCell {
                             WorkExperienceTableText(entry.team)
                         }
                     }
-                    .width(min: 180, ideal: 220)
+                    .width(220)
 
                     TableColumn("Feature") { entry in
                         WorkExperienceTableCell {
                             WorkExperienceTableText(entry.feature)
                         }
                     }
-                    .width(min: 220, ideal: 260)
+                    .width(260)
 
                     TableColumn("Task") { entry in
                         WorkExperienceTableCell {
                             WorkExperienceTableText(entry.task.isBlank ? "Untitled task" : entry.task)
                         }
                     }
-                    .width(min: 320, ideal: 420)
+                    .width(420)
 
                     TableColumn("Duration") { entry in
                         WorkExperienceTableCell {
-                            WorkExperienceTableText(AppDateFormatters.duration(start: entry.startDate, end: entry.endDate))
+                            WorkExperienceTableText(entry.durationText)
                         }
                     }
-                    .width(min: 110, ideal: 130)
+                    .width(130)
 
                     TableColumn("Tags") { entry in
                         WorkExperienceTableCell {
-                            WorkExperienceTagText(entry.tags, lineLimit: 1)
+                            TableValueText(value: entry.tags)
                         }
                     }
-                    .width(min: 300, ideal: 400)
+                    .width(400)
                 }
                 .frame(minWidth: 0, maxWidth: .infinity)
                 .background(
                     TableHeaderFontInstaller(
-                        rowHighlights: rowHighlights
+                        rowHighlights: rowHighlights,
+                        layoutSignature: tableLayoutSignature,
+                        outlinedRowIndex: outlinedRowIndex
                     )
                     .frame(width: 0, height: 0)
                 )
-                .id(store.selectedWorkID == nil ? "tasks-table-full" : "tasks-table-detail")
-
+            } detail: {
                 if let id = store.selectedWorkID,
                    let binding = store.bindingForWorkExperience(id: id) {
-                    Divider()
-
                     WorkExperienceDetailView(
                         entry: binding,
                         isEditing: $isEditing,
                         availableSkillOptions: availableSkills,
-                        dropdownOptions: dropdownOptions
-                    ) {
-                        store.deleteSelectedWorkExperience()
-                        isEditing = false
-                    }
+                        dropdownOptions: dropdownOptions,
+                        onClose: {
+                            requestCloseDetailPane()
+                        },
+                        onDelete: {
+                            store.deleteSelectedWorkExperience()
+                            isEditing = false
+                        }
+                    )
                     .id(id)
-                    .frame(minWidth: 360, idealWidth: 430, maxWidth: 560)
                 }
             }
         }
@@ -200,12 +232,32 @@ struct WorkExperienceView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshTaskListReferenceDay()
         }
+        .confirmationDialog(
+            "Close the task details?",
+            isPresented: $showCloseEditingConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Close", role: .destructive) {
+                confirmCloseDetailPane()
+            }
+            Button("Cancel", role: .cancel) {
+                clearPendingFilterChanges()
+            }
+        } message: {
+            Text("You are editing this task. Close the right pane?")
+        }
     }
 
     private var tagFilterBinding: Binding<String> {
         Binding(
             get: { selectedTag },
             set: { newValue in
+                guard canApplyFilterChange(search: searchText, tag: newValue) else {
+                    pendingSelectedTag = newValue
+                    pendingSearchText = nil
+                    showCloseEditingConfirmation = true
+                    return
+                }
                 selectedTag = newValue
                 reconcileSelection()
             }
@@ -216,17 +268,73 @@ struct WorkExperienceView: View {
         Binding(
             get: { searchText },
             set: { newValue in
+                guard canApplyFilterChange(search: newValue, tag: selectedTag) else {
+                    pendingSearchText = newValue
+                    pendingSelectedTag = nil
+                    showCloseEditingConfirmation = true
+                    return
+                }
                 searchText = newValue
                 reconcileSelection()
             }
         )
     }
 
+    private func filteredEntries(search: String, tag: String) -> [WorkExperience] {
+        let searchResults = store.filteredWorkExperiences(search: search)
+        guard !tag.isEmpty else { return searchResults }
+        return searchResults.filter { entry in
+            tags(in: entry.tags).contains(tag)
+        }
+    }
+
+    private func canApplyFilterChange(search: String, tag: String) -> Bool {
+        guard isEditing, let selectedID = store.selectedWorkID else { return true }
+        return filteredEntries(search: search, tag: tag).contains { $0.id == selectedID }
+    }
+
     private func reconcileSelection() {
         guard let selectedID = store.selectedWorkID else { return }
         guard !entries.contains(where: { $0.id == selectedID }) else { return }
+        if isEditing {
+            showCloseEditingConfirmation = true
+            return
+        }
         store.selectedWorkID = entries.first?.id
         isEditing = false
+    }
+
+    private func requestCloseDetailPane() {
+        if isEditing {
+            showCloseEditingConfirmation = true
+        } else {
+            closeDetailPane()
+        }
+    }
+
+    private func closeDetailPane() {
+        store.selectedWorkID = nil
+        isEditing = false
+    }
+
+    private func confirmCloseDetailPane() {
+        applyPendingFilterChanges()
+        closeDetailPane()
+    }
+
+    private func applyPendingFilterChanges() {
+        if let pendingSearchText {
+            searchText = pendingSearchText
+        }
+        if let pendingSelectedTag {
+            selectedTag = pendingSelectedTag
+        }
+        clearPendingFilterChanges()
+    }
+
+    private func clearPendingFilterChanges() {
+        pendingSearchText = nil
+        pendingSelectedTag = nil
     }
 
     private func refreshTaskListReferenceDay(referenceDate: Date = Date()) {
@@ -246,6 +354,7 @@ private struct WorkExperienceDetailView: View {
     @Binding var isEditing: Bool
     var availableSkillOptions: [String]
     var dropdownOptions: WorkExperienceDropdownOptions
+    var onClose: () -> Void
     var onDelete: () -> Void
     @State private var showDeleteConfirmation = false
     @State private var selectedTab: WorkExperienceDetailTab = .overview
@@ -253,21 +362,16 @@ private struct WorkExperienceDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Spacer()
-
-                    Button {
+                DetailPaneToolbar(
+                    isEditing: isEditing,
+                    onClose: onClose,
+                    onToggleEditing: {
                         isEditing.toggle()
-                    } label: {
-                        Label(isEditing ? "Done" : "Edit", systemImage: isEditing ? "checkmark" : "pencil")
-                    }
-
-                    Button(role: .destructive) {
+                    },
+                    onDelete: {
                         showDeleteConfirmation = true
-                    } label: {
-                        Label("Delete", systemImage: "trash")
                     }
-                }
+                )
 
                 Picker("Detail", selection: $selectedTab) {
                     ForEach(WorkExperienceDetailTab.allCases) { tab in
@@ -288,9 +392,10 @@ private struct WorkExperienceDetailView: View {
                 } else {
                     WorkExperienceReadOnlyView(entry: entry, selectedTab: selectedTab)
                 }
-            }
-            .padding(18)
         }
+        .padding(18)
+        }
+        .font(.workLogDetailPaneBody)
         .confirmationDialog(
             "Delete this work log?",
             isPresented: $showDeleteConfirmation,
@@ -350,7 +455,7 @@ private struct WorkExperienceReadOnlyView: View {
                 ReadOnlyTagsField(value: entry.tags)
                 ReadOnlyDetailField(
                     title: "Dates",
-                    value: AppDateFormatters.range(start: entry.startDate, end: entry.endDate),
+                    value: entry.dateSummaryText,
                     hideWhenEmpty: false
                 )
             }
@@ -382,13 +487,13 @@ private struct ReadOnlyTagsField: View {
 
 struct WorkExperienceTagText: View {
     var value: String
-    var lineLimit: Int
+    var lineLimit: Int?
 
     private var tags: [String] {
         WorkExperienceTagOptions.tags(in: value)
     }
 
-    init(_ value: String, lineLimit: Int = 2) {
+    init(_ value: String, lineLimit: Int? = 2) {
         self.value = value
         self.lineLimit = lineLimit
     }
@@ -403,6 +508,9 @@ struct WorkExperienceTagText: View {
             }
         }
         .lineLimit(lineLimit)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .workLogHelp(value)
     }
 
     @ViewBuilder
@@ -426,9 +534,7 @@ private struct WorkExperienceTableText: View {
     }
 
     var body: some View {
-        Text(value)
-            .lineLimit(1)
-            .truncationMode(.tail)
+        TableValueText(value: value)
             .frame(maxWidth: .infinity, minHeight: Self.rowHeight, alignment: .leading)
     }
 }
@@ -579,7 +685,10 @@ private struct WorkExperiencePlannerReadOnlySection: View {
                 if !entry.orderedSubtasks.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(entry.orderedSubtasks) { subtask in
-                            WorkExperiencePlannerReadOnlyRow(subtask: subtask)
+                            WorkExperiencePlannerReadOnlyRow(
+                                subtask: subtask,
+                                showsDueDate: entry.usesDateLogic
+                            )
                         }
                     }
                 }
@@ -599,7 +708,7 @@ private struct WorkFieldRow<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.callout)
+                .font(.workLogDetailPaneLabel)
                 .foregroundStyle(.workLogHeaderText)
             content
         }
@@ -626,6 +735,13 @@ private struct WorkExperiencePlannerEditor: View {
                     emptyMessage: "Add subtasks to turn this task into a simple checklist."
                 )
 
+                if !entry.usesDateLogic {
+                    Text("Task dates are off. This plan behaves like a checklist until you enable dates in Overview.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 if entry.subtasks.isEmpty {
                     Text("No subtasks yet.")
                         .font(.callout)
@@ -635,6 +751,7 @@ private struct WorkExperiencePlannerEditor: View {
                         ForEach(Array(entry.subtasks.indices), id: \.self) { index in
                             WorkExperiencePlannerSubtaskRow(
                                 subtask: $entry.subtasks[index],
+                                showsDueDate: entry.usesDateLogic,
                                 minimumDueDate: entry.startDate,
                                 maximumDueDate: entry.endDate,
                                 canMoveUp: index > 0,
@@ -658,10 +775,8 @@ private struct WorkExperiencePlannerEditor: View {
 
                     HStack {
                         Spacer()
-                        Button {
+                        IconOnlyActionButton("Add", systemImage: "plus") {
                             addSubtask()
-                        } label: {
-                            Label("Add", systemImage: "plus")
                         }
                         .disabled(trimmedDraftTitle.isEmpty)
                     }
@@ -681,7 +796,7 @@ private struct WorkExperiencePlannerEditor: View {
             WorkExperienceSubtask(
                 title: trimmedDraftTitle,
                 status: .todo,
-                dueDate: entry.endDate,
+                dueDate: entry.usesDateLogic ? entry.endDate : Date(),
                 order: entry.subtasks.count
             )
         )
@@ -737,6 +852,12 @@ private struct WorkExperiencePlannerSummaryView: View {
                     .foregroundStyle(.secondary)
             }
 
+            if !entry.usesDateLogic {
+                Text("Due-date logic is disabled for this task.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             if entry.totalSubtaskCount == 0 {
                 Text(emptyMessage)
                     .font(.callout)
@@ -761,6 +882,7 @@ private struct WorkExperiencePlannerSummaryView: View {
 
 private struct WorkExperiencePlannerReadOnlyRow: View {
     var subtask: WorkExperienceSubtask
+    var showsDueDate: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -778,15 +900,18 @@ private struct WorkExperiencePlannerReadOnlyRow: View {
 
             Spacer(minLength: 12)
 
-            Text("Due \(AppDateFormatters.short(subtask.dueDate))")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            if showsDueDate {
+                Text("Due \(AppDateFormatters.short(subtask.dueDate))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }
 
 private struct WorkExperiencePlannerSubtaskRow: View {
     @Binding var subtask: WorkExperienceSubtask
+    var showsDueDate: Bool
     var minimumDueDate: Date
     var maximumDueDate: Date
     var canMoveUp: Bool
@@ -822,6 +947,7 @@ private struct WorkExperiencePlannerSubtaskRow: View {
                     }
                 } label: {
                     WorkExperiencePlannerStatusChip(status: subtask.status)
+                        .workLogHoverOutline(cornerRadius: 7)
                 }
                 .buttonStyle(.plain)
 
@@ -830,24 +956,33 @@ private struct WorkExperiencePlannerSubtaskRow: View {
                 Button(action: onMoveUp) {
                     Image(systemName: "arrow.up")
                         .frame(width: 16)
+                        .padding(6)
+                        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
                 }
                 .buttonStyle(.plain)
+                .workLogHoverOutline(cornerRadius: 7)
                 .foregroundStyle(canMoveUp ? Color.primary.opacity(0.8) : Color.secondary.opacity(0.35))
                 .disabled(!canMoveUp)
 
                 Button(action: onMoveDown) {
                     Image(systemName: "arrow.down")
                         .frame(width: 16)
+                        .padding(6)
+                        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
                 }
                 .buttonStyle(.plain)
+                .workLogHoverOutline(cornerRadius: 7)
                 .foregroundStyle(canMoveDown ? Color.primary.opacity(0.8) : Color.secondary.opacity(0.35))
                 .disabled(!canMoveDown)
 
                 Button(role: .destructive, action: onDelete) {
                     Image(systemName: "trash")
                         .frame(width: 16)
+                        .padding(6)
+                        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
                 }
                 .buttonStyle(.plain)
+                .workLogHoverOutline(cornerRadius: 7)
             }
 
             WorkExperiencePlannerTextEditor(
@@ -856,19 +991,21 @@ private struct WorkExperiencePlannerSubtaskRow: View {
                 minHeight: 78
             )
 
-            HStack {
-                Text("Due")
-                    .foregroundStyle(.secondary)
-                Spacer()
-                DatePicker(
-                    "",
-                    selection: dueDateBinding,
-                    in: minimumDueDate...maximumDueDate,
-                    displayedComponents: .date
-                )
-                    .labelsHidden()
+            if showsDueDate {
+                HStack {
+                    Text("Due")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    DatePicker(
+                        "",
+                        selection: dueDateBinding,
+                        in: minimumDueDate...maximumDueDate,
+                        displayedComponents: .date
+                    )
+                        .labelsHidden()
+                }
+                .font(.caption)
             }
-            .font(.caption)
         }
     }
 }
@@ -892,7 +1029,7 @@ private struct WorkExperiencePlannerTextEditor: View {
             }
 
             TextEditor(text: $text)
-                .font(.body)
+                .font(.workLogDetailPaneBody)
                 .frame(minHeight: minHeight)
                 .padding(4)
                 .scrollContentBackground(.hidden)
@@ -921,10 +1058,20 @@ private struct WorkExperiencePlannerStatusChip: View {
 private struct WorkExperienceDateRangeEditor: View {
     @Binding var entry: WorkExperience
 
+    private var usesDateLogicBinding: Binding<Bool> {
+        Binding(
+            get: { entry.usesDateLogic },
+            set: { newValue in
+                entry.setDateLogicEnabled(newValue)
+            }
+        )
+    }
+
     private var startDateBinding: Binding<Date> {
         Binding(
             get: { entry.startDate },
             set: { newValue in
+                entry.usesDateLogic = true
                 entry.startDate = newValue
                 entry.normalizeDateRange()
                 entry.normalizePlannerSubtasks()
@@ -936,6 +1083,7 @@ private struct WorkExperienceDateRangeEditor: View {
         Binding(
             get: { entry.endDate },
             set: { newValue in
+                entry.usesDateLogic = true
                 entry.endDate = newValue
                 entry.normalizeDateRange()
                 entry.normalizePlannerSubtasks()
@@ -946,12 +1094,21 @@ private struct WorkExperienceDateRangeEditor: View {
     var body: some View {
         WorkFieldRow(title: "Dates") {
             VStack(alignment: .leading, spacing: 10) {
-                datePickerRow(title: "Start", selection: startDateBinding)
-                datePickerRow(title: "Due", selection: endDateBinding)
+                Toggle("Enable task dates", isOn: usesDateLogicBinding)
 
-                Text(AppDateFormatters.range(start: entry.startDate, end: entry.endDate))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if entry.usesDateLogic {
+                    datePickerRow(title: "Start", selection: startDateBinding)
+                    datePickerRow(title: "Due", selection: endDateBinding)
+
+                    Text(entry.dateSummaryText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("No task dates are set. Duration, overdue, and due-date logic stay off until you enable dates.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
@@ -1082,6 +1239,7 @@ private struct MultiSelectSkillPicker: View {
             .padding(.horizontal, 9)
             .padding(.vertical, 7)
             .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
+            .workLogHoverOutline(cornerRadius: 7)
         }
         .buttonStyle(.plain)
         .popover(isPresented: $isPresented, arrowEdge: .bottom) {
@@ -1118,6 +1276,9 @@ private struct MultiSelectSkillPicker: View {
                             Text("Add \"\(newSkill)\"")
                             Spacer()
                         }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .workLogHoverOutline(cornerRadius: 6)
                     }
                     .buttonStyle(.plain)
                 }
@@ -1144,6 +1305,7 @@ private struct MultiSelectSkillPicker: View {
                                         : Color.clear,
                                     in: RoundedRectangle(cornerRadius: 6)
                                 )
+                                .workLogHoverOutline(cornerRadius: 6)
                             }
                             .buttonStyle(.plain)
                         }
@@ -1167,6 +1329,9 @@ private struct MultiSelectSkillPicker: View {
                             skills = ""
                         }
                         .buttonStyle(.plain)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .workLogHoverOutline(cornerRadius: 6)
                     }
 
                     Spacer()
@@ -1174,6 +1339,9 @@ private struct MultiSelectSkillPicker: View {
                     Button("Done") {
                         isPresented = false
                     }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .workLogHoverOutline(cornerRadius: 6)
                 }
             }
             .padding(14)

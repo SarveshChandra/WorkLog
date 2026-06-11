@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 final class AppStore: ObservableObject {
@@ -108,11 +109,38 @@ final class AppStore: ObservableObject {
     }
 
     func addWorkExperience() {
-        let entry = WorkExperience()
+        let entry = WorkExperience(usesDateLogic: false)
         data.workExperiences.insert(entry, at: 0)
         selectedWorkID = entry.id
         selectedSection = .workExperience
         save()
+    }
+
+    func importWorkExperiences() {
+        let panel = NSOpenPanel()
+        panel.title = "Import Tasks"
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+
+        guard panel.runModal() == .OK else { return }
+
+        var imported: [WorkExperience] = []
+        for url in panel.urls {
+            do {
+                imported.append(contentsOf: try TaskImportService.decodeWorkExperiences(from: url))
+            } catch {
+                statusMessage = "Could not import \(url.lastPathComponent): \(error.localizedDescription)"
+            }
+        }
+
+        guard !imported.isEmpty else { return }
+        data.workExperiences.insert(contentsOf: imported, at: 0)
+        selectedWorkID = imported.first?.id
+        selectedSection = .workExperience
+        save()
+        statusMessage = "Imported \(imported.count) task\(imported.count == 1 ? "" : "s")."
     }
 
     func deleteSelectedWorkExperience() {
@@ -143,10 +171,10 @@ final class AppStore: ObservableObject {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         let sorted = data.workExperiences.sorted { lhs, rhs in
             if lhs.sortDate == rhs.sortDate {
-                if lhs.startDate == rhs.startDate {
-                    return lhs.updatedAt > rhs.updatedAt
+                if lhs.usesDateLogic && rhs.usesDateLogic, lhs.startDate != rhs.startDate {
+                    return lhs.startDate > rhs.startDate
                 }
-                return lhs.startDate > rhs.startDate
+                return lhs.updatedAt > rhs.updatedAt
             }
             return lhs.sortDate > rhs.sortDate
         }
@@ -212,12 +240,13 @@ final class AppStore: ObservableObject {
         )
     }
 
-    func filteredOpportunities(search: String) -> [InterviewOpportunity] {
+    func filteredOpportunities(search: String, filter: InterviewFilter? = nil) -> [InterviewOpportunity] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         let latestOpportunityIDsByCompany = latestOpportunityIDsByCompany()
+        let activeFilter = filter ?? interviewFilter
 
         let filteredByView = data.interviewOpportunities.filter { opportunity in
-            switch interviewFilter {
+            switch activeFilter {
             case .all:
                 true
             case .active:
@@ -234,7 +263,7 @@ final class AppStore: ObservableObject {
             : filteredByView.filter { $0.searchText.localizedCaseInsensitiveContains(query) }
 
         return filteredBySearch.sorted { lhs, rhs in
-            switch interviewFilter {
+            switch activeFilter {
             case .all, .active:
                 return Self.sortByActionThenActivity(lhs, rhs)
             case .eligibleAgain:

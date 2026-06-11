@@ -94,6 +94,7 @@ struct WorkExperience: Identifiable, Codable, Hashable {
     var tags: String = ""
     var startDate: Date = Date()
     var endDate: Date = Date()
+    var usesDateLogic: Bool = false
     var subtasks: [WorkExperienceSubtask] = []
     var situation: String = ""
     var expectedResult: String = ""
@@ -118,6 +119,7 @@ struct WorkExperience: Identifiable, Codable, Hashable {
         tags: String = "",
         startDate: Date = Date(),
         endDate: Date = Date(),
+        usesDateLogic: Bool? = nil,
         subtasks: [WorkExperienceSubtask] = [],
         situation: String = "",
         expectedResult: String = "",
@@ -140,13 +142,23 @@ struct WorkExperience: Identifiable, Codable, Hashable {
         self.task = task
         self.tags = tags
         let normalizedRange = Self.normalizedDateRange(start: startDate, end: endDate)
+        let resolvedCreatedAt = createdAt
+        let resolvedUpdatedAt = updatedAt
+        let resolvedUsesDateLogic = usesDateLogic ?? Self.inferredUsesDateLogic(
+            hasStoredDateFields: true,
+            start: normalizedRange.start,
+            end: normalizedRange.end,
+            createdAt: resolvedCreatedAt,
+            updatedAt: resolvedUpdatedAt
+        )
         self.startDate = normalizedRange.start
         self.endDate = normalizedRange.end
+        self.usesDateLogic = resolvedUsesDateLogic
         self.subtasks = Self.normalizedSubtasks(
             subtasks,
-            fallbackDueDate: normalizedRange.end,
-            minimumDueDate: normalizedRange.start,
-            maximumDueDate: normalizedRange.end
+            fallbackDueDate: resolvedUsesDateLogic ? normalizedRange.end : nil,
+            minimumDueDate: resolvedUsesDateLogic ? normalizedRange.start : nil,
+            maximumDueDate: resolvedUsesDateLogic ? normalizedRange.end : nil
         )
         self.situation = situation
         self.expectedResult = expectedResult
@@ -156,8 +168,8 @@ struct WorkExperience: Identifiable, Codable, Hashable {
         self.skillsUsed = skillsUsed
         self.learning = learning
         self.approach = approach
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
+        self.createdAt = resolvedCreatedAt
+        self.updatedAt = resolvedUpdatedAt
     }
 
     enum CodingKeys: String, CodingKey {
@@ -172,6 +184,7 @@ struct WorkExperience: Identifiable, Codable, Hashable {
         case tags
         case startDate
         case endDate
+        case usesDateLogic
         case subtasks
         case date
         case situation
@@ -198,17 +211,28 @@ struct WorkExperience: Identifiable, Codable, Hashable {
         feature = try container.decodeIfPresent(String.self, forKey: .feature) ?? ""
         task = try container.decodeIfPresent(String.self, forKey: .task) ?? ""
         tags = try container.decodeIfPresent(String.self, forKey: .tags) ?? ""
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
         let legacyDate = try container.decodeIfPresent(Date.self, forKey: .date)
         let decodedStartDate = try container.decodeIfPresent(Date.self, forKey: .startDate) ?? legacyDate ?? Date()
         let decodedEndDate = try container.decodeIfPresent(Date.self, forKey: .endDate) ?? decodedStartDate
         let normalizedRange = Self.normalizedDateRange(start: decodedStartDate, end: decodedEndDate)
+        let hasStoredDateFields = container.contains(.startDate) || container.contains(.endDate) || container.contains(.date)
         startDate = normalizedRange.start
         endDate = normalizedRange.end
+        usesDateLogic = try container.decodeIfPresent(Bool.self, forKey: .usesDateLogic)
+            ?? Self.inferredUsesDateLogic(
+                hasStoredDateFields: hasStoredDateFields,
+                start: normalizedRange.start,
+                end: normalizedRange.end,
+                createdAt: createdAt,
+                updatedAt: updatedAt
+            )
         subtasks = Self.normalizedSubtasks(
             try container.decodeIfPresent([WorkExperienceSubtask].self, forKey: .subtasks) ?? [],
-            fallbackDueDate: normalizedRange.end,
-            minimumDueDate: normalizedRange.start,
-            maximumDueDate: normalizedRange.end
+            fallbackDueDate: usesDateLogic ? normalizedRange.end : nil,
+            minimumDueDate: usesDateLogic ? normalizedRange.start : nil,
+            maximumDueDate: usesDateLogic ? normalizedRange.end : nil
         )
         situation = try container.decodeIfPresent(String.self, forKey: .situation) ?? ""
         expectedResult = try container.decodeIfPresent(String.self, forKey: .expectedResult) ?? ""
@@ -220,8 +244,6 @@ struct WorkExperience: Identifiable, Codable, Hashable {
         skillsUsed = try container.decodeIfPresent(String.self, forKey: .skillsUsed) ?? ""
         learning = try container.decodeIfPresent(String.self, forKey: .learning) ?? ""
         approach = try container.decodeIfPresent(String.self, forKey: .approach) ?? ""
-        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
-        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
     }
 
     func encode(to encoder: Encoder) throws {
@@ -238,12 +260,13 @@ struct WorkExperience: Identifiable, Codable, Hashable {
         let normalizedRange = Self.normalizedDateRange(start: startDate, end: endDate)
         try container.encode(normalizedRange.start, forKey: .startDate)
         try container.encode(normalizedRange.end, forKey: .endDate)
+        try container.encode(usesDateLogic, forKey: .usesDateLogic)
         try container.encode(
             Self.normalizedSubtasks(
                 subtasks,
-                fallbackDueDate: normalizedRange.end,
-                minimumDueDate: normalizedRange.start,
-                maximumDueDate: normalizedRange.end
+                fallbackDueDate: usesDateLogic ? normalizedRange.end : nil,
+                minimumDueDate: usesDateLogic ? normalizedRange.start : nil,
+                maximumDueDate: usesDateLogic ? normalizedRange.end : nil
             ),
             forKey: .subtasks
         )
@@ -283,8 +306,16 @@ struct WorkExperience: Identifiable, Codable, Hashable {
         .joined(separator: " ")
     }
 
+    var dateSummaryText: String {
+        usesDateLogic ? AppDateFormatters.range(start: startDate, end: endDate) : "Unknown"
+    }
+
+    var durationText: String {
+        usesDateLogic ? AppDateFormatters.duration(start: startDate, end: endDate) : "Unknown"
+    }
+
     var effectiveEndDate: Date {
-        endDate
+        usesDateLogic ? endDate : updatedAt
     }
 
     var sortDate: Date {
@@ -292,15 +323,15 @@ struct WorkExperience: Identifiable, Codable, Hashable {
     }
 
     var hasDateRange: Bool {
-        !Calendar.current.isDate(startDate, inSameDayAs: endDate)
+        usesDateLogic && !Calendar.current.isDate(startDate, inSameDayAs: endDate)
     }
 
     var orderedSubtasks: [WorkExperienceSubtask] {
         Self.normalizedSubtasks(
             subtasks,
-            fallbackDueDate: endDate,
-            minimumDueDate: startDate,
-            maximumDueDate: endDate
+            fallbackDueDate: usesDateLogic ? endDate : nil,
+            minimumDueDate: usesDateLogic ? startDate : nil,
+            maximumDueDate: usesDateLogic ? endDate : nil
         )
     }
 
@@ -352,7 +383,10 @@ struct WorkExperience: Identifiable, Codable, Hashable {
         guard totalSubtaskCount > 0 else { return "No subtasks" }
         return orderedSubtasks
             .map { subtask in
-                "\(subtask.order + 1). \(subtask.status.rawValue), due \(AppDateFormatters.short(subtask.dueDate)): \(subtask.displayTitle)"
+                if usesDateLogic {
+                    return "\(subtask.order + 1). \(subtask.status.rawValue), due \(AppDateFormatters.short(subtask.dueDate)): \(subtask.displayTitle)"
+                }
+                return "\(subtask.order + 1). \(subtask.status.rawValue): \(subtask.displayTitle)"
             }
             .joined(separator: "; ")
     }
@@ -377,7 +411,7 @@ struct WorkExperience: Identifiable, Codable, Hashable {
     }
 
     func isOverdueForTaskList(referenceDate: Date) -> Bool {
-        guard !isCompleteForTaskList else { return false }
+        guard usesDateLogic, !isCompleteForTaskList else { return false }
 
         let calendar = Calendar.current
         let dueDay = calendar.startOfDay(for: endDate)
@@ -394,10 +428,27 @@ struct WorkExperience: Identifiable, Codable, Hashable {
     mutating func normalizePlannerSubtasks() {
         subtasks = Self.normalizedSubtasks(
             subtasks,
-            fallbackDueDate: endDate,
-            minimumDueDate: startDate,
-            maximumDueDate: endDate
+            fallbackDueDate: usesDateLogic ? endDate : nil,
+            minimumDueDate: usesDateLogic ? startDate : nil,
+            maximumDueDate: usesDateLogic ? endDate : nil
         )
+    }
+
+    mutating func setDateLogicEnabled(_ isEnabled: Bool, anchorDate: Date = Date()) {
+        guard usesDateLogic != isEnabled else { return }
+        if isEnabled && Self.looksLikePlaceholderDateRange(
+            start: startDate,
+            end: endDate,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        ) {
+            let anchoredDay = Calendar.current.startOfDay(for: anchorDate)
+            startDate = anchoredDay
+            endDate = anchoredDay
+        }
+        usesDateLogic = isEnabled
+        normalizeDateRange()
+        normalizePlannerSubtasks()
     }
 
     mutating func reindexPlannerSubtasksInCurrentOrder() {
@@ -414,6 +465,34 @@ struct WorkExperience: Identifiable, Codable, Hashable {
         }
 
         return (start, end)
+    }
+
+    private static func inferredUsesDateLogic(
+        hasStoredDateFields: Bool,
+        start: Date,
+        end: Date,
+        createdAt: Date,
+        updatedAt: Date
+    ) -> Bool {
+        guard hasStoredDateFields else { return false }
+        return !looksLikePlaceholderDateRange(
+            start: start,
+            end: end,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
+
+    private static func looksLikePlaceholderDateRange(
+        start: Date,
+        end: Date,
+        createdAt: Date,
+        updatedAt: Date
+    ) -> Bool {
+        guard Calendar.current.isDate(start, inSameDayAs: end) else { return false }
+        let matchesCreationTime = abs(start.timeIntervalSince(createdAt)) < 120
+        let matchesUpdateTime = abs(end.timeIntervalSince(updatedAt)) < 120
+        return matchesCreationTime && matchesUpdateTime
     }
 
     private static func normalizedSubtasks(

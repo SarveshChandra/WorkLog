@@ -300,7 +300,7 @@ private enum AppleIntelligenceTaskAnalyzer {
 }
 
 private enum TaskSnapshotHasher {
-    private static let insightVersion = "dashboard-insights-v8-planner-subtasks"
+    private static let insightVersion = "dashboard-insights-v9-optional-task-dates"
 
     static func hash(for entries: [WorkExperience]) -> String {
         stableHash("\(insightVersion)\u{1D}\(snapshot(for: entries))")
@@ -320,12 +320,12 @@ private enum TaskSnapshotHasher {
                     entry.feature,
                     entry.task,
                     entry.tags,
-                    String(entry.startDate.timeIntervalSince1970),
-                    String(entry.effectiveEndDate.timeIntervalSince1970),
+                    entry.usesDateLogic ? String(entry.startDate.timeIntervalSince1970) : "undated",
+                    entry.usesDateLogic ? String(entry.effectiveEndDate.timeIntervalSince1970) : "undated",
                     entry.plannerStatus.rawValue,
                     entry.plannerProgressText,
                     entry.plannerSnapshotText,
-                    entry.hasDateRange ? "range" : "single-day",
+                    entry.usesDateLogic ? (entry.hasDateRange ? "range" : "single-day") : "undated",
                     entry.situation,
                     entry.challenges,
                     entry.skillsUsed,
@@ -428,7 +428,10 @@ private enum FoundationModelsTaskAnalyzer {
         entries
             .sorted { lhs, rhs in
                 if lhs.sortDate == rhs.sortDate {
-                    return lhs.startDate > rhs.startDate
+                    if lhs.usesDateLogic && rhs.usesDateLogic, lhs.startDate != rhs.startDate {
+                        return lhs.startDate > rhs.startDate
+                    }
+                    return lhs.updatedAt > rhs.updatedAt
                 }
                 return lhs.sortDate > rhs.sortDate
             }
@@ -444,7 +447,7 @@ private enum FoundationModelsTaskAnalyzer {
                     "Feature=\(compact(entry.feature, limit: 45))",
                     "Task=\(compact(entry.task, limit: 70))",
                     "Tags=\(compact(entry.tags, limit: 90))",
-                    "Dates=\(AppDateFormatters.range(start: entry.startDate, end: entry.endDate))",
+                    "Dates=\(entry.dateSummaryText)",
                     "PlanStatus=\(entry.plannerStatus.rawValue)",
                     "PlanProgress=\(compact(entry.plannerProgressText, limit: 40))",
                     "NextStep=\(compact(entry.plannerNextStepText ?? "None", limit: 70))",

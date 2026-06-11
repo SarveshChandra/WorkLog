@@ -42,19 +42,28 @@ struct SettingsView: View {
                                 store.backupNow()
                             } label: {
                                 Label("Backup Now", systemImage: "arrow.triangle.2.circlepath")
+                                    .labelStyle(.iconOnly)
                             }
+                            .help("Backup Now")
+                            .accessibilityLabel("Backup Now")
 
                             Button {
                                 store.restoreLatestBackup()
                             } label: {
                                 Label("Restore Latest", systemImage: "clock.arrow.circlepath")
+                                    .labelStyle(.iconOnly)
                             }
+                            .help("Restore Latest")
+                            .accessibilityLabel("Restore Latest")
 
                             Button {
                                 store.openBackupFolder()
                             } label: {
                                 Label("Open Backup Folder", systemImage: "folder")
+                                    .labelStyle(.iconOnly)
                             }
+                            .help("Open Backup Folder")
+                            .accessibilityLabel("Open Backup Folder")
                         }
                     }
                 }
@@ -66,13 +75,19 @@ struct SettingsView: View {
                                 store.exportJSON()
                             } label: {
                                 Label("Export JSON", systemImage: "square.and.arrow.up")
+                                    .labelStyle(.iconOnly)
                             }
+                            .help("Export JSON")
+                            .accessibilityLabel("Export JSON")
 
                             Button {
                                 store.openDataFolder()
                             } label: {
                                 Label("Open Data Folder", systemImage: "folder")
+                                    .labelStyle(.iconOnly)
                             }
+                            .help("Open Data Folder")
+                            .accessibilityLabel("Open Data Folder")
                         }
 
                         SettingsPathRow(title: "Data file", value: store.dataFilePath)
@@ -194,5 +209,6 @@ private struct SettingsActionButtonStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: 9)
                     .fill(Color.primary.opacity(configuration.isPressed ? 0.08 : 0.045))
             )
+            .workLogHoverOutline(cornerRadius: 9)
     }
 }

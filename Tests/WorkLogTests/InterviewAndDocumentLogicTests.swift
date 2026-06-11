@@ -182,6 +182,66 @@ final class InterviewAndDocumentLogicTests: XCTestCase {
         XCTAssertEqual(decoded.endDate, legacyDate)
     }
 
+    func testTaskImportServiceKeepsUndatedImportedTasksDateLogicOff() throws {
+        let json = """
+        {
+          "tasks": [
+            "Imported checklist task"
+          ]
+        }
+        """
+
+        let imported = try TaskImportService.decodeWorkExperiences(from: Data(json.utf8))
+
+        XCTAssertEqual(imported.count, 1)
+        XCTAssertEqual(imported.first?.task, "Imported checklist task")
+        XCTAssertEqual(imported.first?.usesDateLogic, false)
+        XCTAssertEqual(imported.first?.durationText, "Unknown")
+    }
+
+    func testTaskImportServiceAppliesRootDefaultsToFlexibleTaskImport() throws {
+        let json = """
+        {
+          "company": "Acme",
+          "designation": "Senior Engineer",
+          "role": "Platform",
+          "project": "Migration",
+          "team": "Core",
+          "feature": "Task import",
+          "tags": ["High Impact", "Automation"],
+          "skills": ["Swift", "JSON"],
+          "startDate": "2026-06-01",
+          "endDate": "2026-06-05",
+          "tasks": [
+            {
+              "title": "Import prepared task list",
+              "subtasks": [
+                { "title": "Review JSON", "status": "done", "dueDate": "2026-05-30" },
+                { "title": "Import tasks", "status": "in progress", "dueDate": "2026-06-08" }
+              ]
+            }
+          ]
+        }
+        """
+
+        let imported = try TaskImportService.decodeWorkExperiences(from: Data(json.utf8))
+
+        XCTAssertEqual(imported.count, 1)
+        let entry = try XCTUnwrap(imported.first)
+        XCTAssertEqual(entry.company, "Acme")
+        XCTAssertEqual(entry.designation, "Senior Engineer")
+        XCTAssertEqual(entry.role, "Platform")
+        XCTAssertEqual(entry.projectProduct, "Migration")
+        XCTAssertEqual(entry.team, "Core")
+        XCTAssertEqual(entry.feature, "Task import")
+        XCTAssertEqual(entry.tags, "High Impact, Automation")
+        XCTAssertEqual(entry.skillsUsed, "Swift, JSON")
+        XCTAssertTrue(entry.usesDateLogic)
+        XCTAssertEqual(entry.orderedSubtasks.map(\.status), [.done, .doing])
+        XCTAssertEqual(entry.orderedSubtasks.first?.dueDate, entry.startDate)
+        XCTAssertEqual(entry.orderedSubtasks.last?.dueDate, entry.endDate)
+    }
+
     func testWorkExperienceDateRangeNormalizesEarlierEndDate() {
         let startDate = Date(timeIntervalSince1970: 1_700_000_000)
         let earlierEndDate = Date(timeIntervalSince1970: 1_699_900_000)

@@ -42,6 +42,7 @@ SOURCE_FILES=(
   "$ROOT_DIR/Sources/WorkLog/Services/DataPersistenceService.swift"
   "$ROOT_DIR/Sources/WorkLog/Services/DocumentStorageService.swift"
   "$ROOT_DIR/Sources/WorkLog/Services/BackupService.swift"
+  "$ROOT_DIR/Sources/WorkLog/Services/TaskImportService.swift"
   "$ROOT_DIR/Sources/WorkLog/Stores/AppStore.swift"
   "$ROOT_DIR/Sources/WorkLog/Views/ContentView.swift"
   "$ROOT_DIR/Sources/WorkLog/Views/DashboardView.swift"

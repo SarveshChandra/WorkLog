@@ -52,6 +52,7 @@ struct TopBarView: View {
                                 RoundedRectangle(cornerRadius: 7)
                                     .fill(selection == section ? Color.workLogSkyBlue.opacity(0.18) : Color.primary.opacity(0.001))
                             }
+                            .workLogHoverOutline(cornerRadius: 7)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)

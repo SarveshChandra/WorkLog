@@ -4,15 +4,58 @@ struct InterviewTrackerView: View {
     @EnvironmentObject private var store: AppStore
     @State private var searchText = ""
     @State private var isEditing = false
+    @State private var showCloseEditingConfirmation = false
+    @State private var pendingSearchText: String?
+    @State private var pendingInterviewFilter: InterviewFilter?
 
     private var opportunities: [InterviewOpportunity] {
-        store.filteredOpportunities(search: searchText)
+        filteredOpportunities(search: searchText, filter: store.interviewFilter)
+    }
+
+    private var outlinedRowIndex: Int? {
+        guard let selectedID = store.selectedOpportunityID else { return nil }
+        return opportunities.firstIndex { $0.id == selectedID }
+    }
+
+    private var currentTableLayoutSignature: Int {
+        var hasher = Hasher()
+        hasher.combine(store.interviewFilter.rawValue)
+        hasher.combine(opportunities.count)
+
+        for opportunity in opportunities {
+            hasher.combine(opportunity.id)
+            hasher.combine(opportunity.company)
+            hasher.combine(opportunity.role)
+            hasher.combine(opportunity.displayStatus)
+            hasher.combine(opportunity.calculatedStage)
+            hasher.combine(opportunity.nextAction)
+            hasher.combine(opportunity.nextActionDueDate)
+            hasher.combine(opportunity.cooldownEligibleDate)
+            hasher.combine(opportunity.techStack)
+            hasher.combine(opportunity.referralProfileName)
+            hasher.combine(opportunity.referralChannel)
+            hasher.combine(opportunity.referralEmail)
+            hasher.combine(opportunity.referralStatus)
+            hasher.combine(opportunity.calculatedLastActivityDate)
+            hasher.combine(opportunity.latestRound?.interviewer)
+            hasher.combine(opportunity.latestRound?.result)
+            hasher.combine(opportunity.contactOrInterviewer)
+            hasher.combine(opportunity.pocEmail)
+            hasher.combine(opportunity.pocNumber)
+            hasher.combine(opportunity.notes)
+        }
+
+        return hasher.finalize()
     }
 
     private var selectionBinding: Binding<UUID?> {
         Binding(
             get: { store.selectedOpportunityID },
             set: { newValue in
+                if newValue == nil, isEditing, store.selectedOpportunityID != nil {
+                    showCloseEditingConfirmation = true
+                    return
+                }
                 store.selectedOpportunityID = newValue
                 isEditing = false
             }
@@ -26,14 +69,11 @@ struct InterviewTrackerView: View {
                 subtitle: "Enter company, role, application link, status, next action, and PoC details. Source, round, last activity, referral summary, and re-eligible date are calculated."
             ) {
                 SearchField(placeholder: "Search opportunities", text: searchBinding)
-                Button {
+                IconOnlyActionButton("Add", systemImage: "plus") {
                     searchText = ""
                     store.interviewFilter = .all
                     store.addInterviewOpportunity()
                     isEditing = true
-                } label: {
-                    Label("Add", systemImage: "plus")
-                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -48,22 +88,23 @@ struct InterviewTrackerView: View {
             .opacity(store.interviewFilter == .all ? 0.62 : 1)
             .padding(.vertical, 6)
 
-            HStack(spacing: 0) {
+            StableDetailPaneLayout(showsDetail: store.selectedOpportunityID != nil) {
                 tableView
-
+            } detail: {
                 if let id = store.selectedOpportunityID,
                    let binding = store.bindingForOpportunity(id: id) {
-                    Divider()
-
                     InterviewOpportunityDetailView(
                         opportunity: binding,
-                        isEditing: $isEditing
-                    ) {
-                        store.deleteSelectedInterviewOpportunity()
-                        isEditing = false
-                    }
+                        isEditing: $isEditing,
+                        onClose: {
+                            requestCloseDetailPane()
+                        },
+                        onDelete: {
+                            store.deleteSelectedInterviewOpportunity()
+                            isEditing = false
+                        }
+                    )
                     .id(id)
-                    .frame(minWidth: 360, idealWidth: 430, maxWidth: 560)
                 }
             }
         }
@@ -72,6 +113,20 @@ struct InterviewTrackerView: View {
         .padding(.bottom, 16)
         .onReceive(store.$data) { _ in
             reconcileSelection()
+        }
+        .confirmationDialog(
+            "Close the interview details?",
+            isPresented: $showCloseEditingConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Close", role: .destructive) {
+                confirmCloseDetailPane()
+            }
+            Button("Cancel", role: .cancel) {
+                clearPendingFilterChanges()
+            }
+        } message: {
+            Text("You are editing this opportunity. Close the right pane?")
         }
     }
 
@@ -92,246 +147,251 @@ struct InterviewTrackerView: View {
         Table(opportunities, selection: selectionBinding) {
             TableColumn("Opportunity") { opportunity in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(opportunity.company.isBlank ? "Untitled company" : opportunity.company)
-                        .lineLimit(1)
-                    Text(opportunity.role.isBlank ? "Role not set" : opportunity.role)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    TableValueText(value: opportunity.company.isBlank ? "Untitled company" : opportunity.company)
+                    TableValueText(
+                        value: opportunity.role.isBlank ? "Role not set" : opportunity.role,
+                        style: .caption,
+                        isSecondary: true
+                    )
                 }
             }
-            .width(min: 300, ideal: 360)
+            .width(360)
 
             TableColumn("Status") { opportunity in
-                Text(opportunity.displayStatus)
+                TableValueText(value: opportunity.displayStatus)
             }
-            .width(min: 130, ideal: 150)
+            .width(150)
 
             TableColumn("Round") { opportunity in
-                Text(opportunity.calculatedStage)
+                TableValueText(value: opportunity.calculatedStage)
             }
-            .width(min: 180, ideal: 220)
+            .width(220)
 
             TableColumn("Next Action") { opportunity in
-                Text(opportunity.nextAction)
-                    .lineLimit(1)
+                TableValueText(value: opportunity.nextAction)
             }
-            .width(min: 320, ideal: 440)
+            .width(440)
 
             TableColumn("Due") { opportunity in
-                Text(AppDateFormatters.short(opportunity.nextActionDueDate))
+                TableValueText(value: AppDateFormatters.short(opportunity.nextActionDueDate))
             }
-            .width(min: 110, ideal: 120)
+            .width(120)
 
             TableColumn("Re-Eligible Date") { opportunity in
-                Text(AppDateFormatters.short(opportunity.cooldownEligibleDate))
+                TableValueText(value: AppDateFormatters.short(opportunity.cooldownEligibleDate))
             }
-            .width(min: 160, ideal: 190)
+            .width(190)
         }
         .frame(minWidth: 0, maxWidth: .infinity)
-        .background(TableHeaderFontInstaller().frame(width: 0, height: 0))
-        .id(store.selectedOpportunityID == nil ? "interviews-table-full" : "interviews-table-detail")
+        .background(
+            TableHeaderFontInstaller(
+                layoutSignature: currentTableLayoutSignature,
+                outlinedRowIndex: outlinedRowIndex
+            )
+            .frame(width: 0, height: 0)
+        )
     }
 
     private var activeTable: some View {
         Table(opportunities, selection: selectionBinding) {
             TableColumn("Opportunity") { opportunity in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(opportunity.company.isBlank ? "Untitled company" : opportunity.company)
-                        .lineLimit(1)
-                    Text(opportunity.role.isBlank ? "Role not set" : opportunity.role)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    TableValueText(value: opportunity.company.isBlank ? "Untitled company" : opportunity.company)
+                    TableValueText(
+                        value: opportunity.role.isBlank ? "Role not set" : opportunity.role,
+                        style: .caption,
+                        isSecondary: true
+                    )
                 }
             }
-            .width(min: 300, ideal: 360)
+            .width(360)
 
             TableColumn("Status") { opportunity in
-                Text(opportunity.displayStatus)
+                TableValueText(value: opportunity.displayStatus)
             }
-            .width(min: 130, ideal: 150)
+            .width(150)
 
             TableColumn("Round") { opportunity in
-                Text(opportunity.calculatedStage)
+                TableValueText(value: opportunity.calculatedStage)
             }
-            .width(min: 180, ideal: 220)
+            .width(220)
 
             TableColumn("Next Action") { opportunity in
-                Text(opportunity.nextAction)
-                    .lineLimit(1)
+                TableValueText(value: opportunity.nextAction)
             }
-            .width(min: 320, ideal: 440)
+            .width(440)
 
             TableColumn("Due") { opportunity in
-                Text(AppDateFormatters.short(opportunity.nextActionDueDate))
+                TableValueText(value: AppDateFormatters.short(opportunity.nextActionDueDate))
             }
-            .width(min: 110, ideal: 120)
+            .width(120)
 
             TableColumn("Tech Stack Required") { opportunity in
-                Text(opportunity.techStack)
-                    .lineLimit(1)
+                TableValueText(value: opportunity.techStack)
             }
-            .width(min: 260, ideal: 340)
+            .width(340)
 
             TableColumn("Referral") { opportunity in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(opportunity.referralProfileName.isBlank ? opportunity.referralChannel : opportunity.referralProfileName)
-                        .lineLimit(1)
+                    TableValueText(
+                        value: opportunity.referralProfileName.isBlank
+                            ? opportunity.referralChannel
+                            : opportunity.referralProfileName
+                    )
                     if !opportunity.referralEmail.isBlank {
-                        Text(opportunity.referralEmail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                        TableValueText(value: opportunity.referralEmail, style: .caption, isSecondary: true)
                     }
                     if !opportunity.referralStatus.isBlank {
-                        Text(opportunity.referralStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                        TableValueText(value: opportunity.referralStatus, style: .caption, isSecondary: true)
                     }
                 }
             }
-            .width(min: 280, ideal: 360)
+            .width(360)
 
             TableColumn("Notes") { opportunity in
-                Text(opportunity.notes)
-                    .lineLimit(1)
+                TableValueText(value: opportunity.notes)
             }
-            .width(min: 320, ideal: 440)
+            .width(440)
         }
         .frame(minWidth: 0, maxWidth: .infinity)
-        .background(TableHeaderFontInstaller().frame(width: 0, height: 0))
-        .id(store.selectedOpportunityID == nil ? "interviews-active-table-full" : "interviews-active-table-detail")
+        .background(
+            TableHeaderFontInstaller(
+                layoutSignature: currentTableLayoutSignature,
+                outlinedRowIndex: outlinedRowIndex
+            )
+            .frame(width: 0, height: 0)
+        )
     }
 
     private var closedTable: some View {
         Table(opportunities, selection: selectionBinding) {
             TableColumn("Company") { opportunity in
-                Text(opportunity.company.isBlank ? "Untitled company" : opportunity.company)
-                    .lineLimit(1)
+                TableValueText(value: opportunity.company.isBlank ? "Untitled company" : opportunity.company)
             }
-            .width(min: 220, ideal: 280)
+            .width(280)
 
             TableColumn("Role") { opportunity in
-                Text(opportunity.role)
-                    .lineLimit(1)
+                TableValueText(value: opportunity.role)
             }
-            .width(min: 240, ideal: 300)
+            .width(300)
 
             TableColumn("Status") { opportunity in
-                Text(opportunity.displayStatus)
+                TableValueText(value: opportunity.displayStatus)
             }
-            .width(min: 130, ideal: 150)
+            .width(150)
 
             TableColumn("Last Activity") { opportunity in
-                Text(AppDateFormatters.short(opportunity.calculatedLastActivityDate))
+                TableValueText(value: AppDateFormatters.short(opportunity.calculatedLastActivityDate))
             }
-            .width(min: 150, ideal: 180)
+            .width(180)
 
             TableColumn("Round") { opportunity in
-                Text(opportunity.calculatedStage)
-                    .lineLimit(1)
+                TableValueText(value: opportunity.calculatedStage)
             }
-            .width(min: 180, ideal: 220)
+            .width(220)
 
             TableColumn("Interviewer") { opportunity in
-                Text(opportunity.latestRound?.interviewer ?? "")
-                    .lineLimit(1)
+                TableValueText(value: opportunity.latestRound?.interviewer ?? "")
             }
-            .width(min: 180, ideal: 240)
+            .width(240)
 
             TableColumn("Outcome") { opportunity in
-                Text(opportunity.latestRound?.result ?? "")
-                    .lineLimit(1)
+                TableValueText(value: opportunity.latestRound?.result ?? "")
             }
-            .width(min: 140, ideal: 170)
+            .width(170)
 
             TableColumn("Re-Eligible Date") { opportunity in
-                Text(AppDateFormatters.short(opportunity.cooldownEligibleDate))
+                TableValueText(value: AppDateFormatters.short(opportunity.cooldownEligibleDate))
             }
-            .width(min: 160, ideal: 190)
+            .width(190)
 
             TableColumn("Notes") { opportunity in
-                Text(opportunity.notes)
-                    .lineLimit(1)
+                TableValueText(value: opportunity.notes)
             }
-            .width(min: 320, ideal: 440)
+            .width(440)
         }
         .frame(minWidth: 0, maxWidth: .infinity)
-        .background(TableHeaderFontInstaller().frame(width: 0, height: 0))
-        .id(store.selectedOpportunityID == nil ? "interviews-closed-table-full" : "interviews-closed-table-detail")
+        .background(
+            TableHeaderFontInstaller(
+                layoutSignature: currentTableLayoutSignature,
+                outlinedRowIndex: outlinedRowIndex
+            )
+            .frame(width: 0, height: 0)
+        )
     }
 
     private var eligibleAgainTable: some View {
         Table(opportunities, selection: selectionBinding) {
             TableColumn("Company") { opportunity in
-                Text(opportunity.company.isBlank ? "Untitled company" : opportunity.company)
-                    .lineLimit(1)
+                TableValueText(value: opportunity.company.isBlank ? "Untitled company" : opportunity.company)
             }
-            .width(min: 240, ideal: 300)
+            .width(300)
 
             TableColumn("Re-Eligible Date") { opportunity in
-                Text(AppDateFormatters.short(opportunity.cooldownEligibleDate))
+                TableValueText(value: AppDateFormatters.short(opportunity.cooldownEligibleDate))
             }
-            .width(min: 160, ideal: 190)
+            .width(190)
 
             TableColumn("Last Activity") { opportunity in
-                Text(AppDateFormatters.short(opportunity.calculatedLastActivityDate))
+                TableValueText(value: AppDateFormatters.short(opportunity.calculatedLastActivityDate))
             }
-            .width(min: 150, ideal: 180)
+            .width(180)
 
             TableColumn("PoC") { opportunity in
-                Text(opportunity.contactOrInterviewer)
-                    .lineLimit(1)
+                TableValueText(value: opportunity.contactOrInterviewer)
             }
-            .width(min: 180, ideal: 240)
+            .width(240)
 
             TableColumn("PoC Email") { opportunity in
-                Text(opportunity.pocEmail)
-                    .lineLimit(1)
+                TableValueText(value: opportunity.pocEmail)
             }
-            .width(min: 220, ideal: 280)
+            .width(280)
 
             TableColumn("PoC Number") { opportunity in
-                Text(opportunity.pocNumber)
-                    .lineLimit(1)
+                TableValueText(value: opportunity.pocNumber)
             }
-            .width(min: 160, ideal: 190)
+            .width(190)
 
             TableColumn("Referral") { opportunity in
-                Text(opportunity.referralProfileName)
-                    .lineLimit(1)
+                TableValueText(value: opportunity.referralProfileName)
             }
-            .width(min: 180, ideal: 240)
+            .width(240)
 
             TableColumn("Referral Email") { opportunity in
-                Text(opportunity.referralEmail)
-                    .lineLimit(1)
+                TableValueText(value: opportunity.referralEmail)
             }
-            .width(min: 220, ideal: 280)
+            .width(280)
 
             TableColumn("Referral Status") { opportunity in
-                Text(opportunity.referralStatus)
-                    .lineLimit(1)
+                TableValueText(value: opportunity.referralStatus)
             }
-            .width(min: 160, ideal: 190)
+            .width(190)
 
             TableColumn("Notes") { opportunity in
-                Text(opportunity.notes)
-                    .lineLimit(1)
+                TableValueText(value: opportunity.notes)
             }
-            .width(min: 320, ideal: 440)
+            .width(440)
         }
         .frame(minWidth: 0, maxWidth: .infinity)
-        .background(TableHeaderFontInstaller().frame(width: 0, height: 0))
-        .id(store.selectedOpportunityID == nil ? "interviews-eligible-table-full" : "interviews-eligible-table-detail")
+        .background(
+            TableHeaderFontInstaller(
+                layoutSignature: currentTableLayoutSignature,
+                outlinedRowIndex: outlinedRowIndex
+            )
+            .frame(width: 0, height: 0)
+        )
     }
 
     private var searchBinding: Binding<String> {
         Binding(
             get: { searchText },
             set: { newValue in
+                guard canApplyFilterChange(search: newValue, filter: store.interviewFilter) else {
+                    pendingSearchText = newValue
+                    pendingInterviewFilter = nil
+                    showCloseEditingConfirmation = true
+                    return
+                }
                 searchText = newValue
                 reconcileSelection()
             }
@@ -342,23 +402,76 @@ struct InterviewTrackerView: View {
         Binding(
             get: { store.interviewFilter },
             set: { newValue in
+                guard canApplyFilterChange(search: searchText, filter: newValue) else {
+                    pendingInterviewFilter = newValue
+                    pendingSearchText = nil
+                    showCloseEditingConfirmation = true
+                    return
+                }
                 store.interviewFilter = newValue
                 reconcileSelection()
             }
         )
     }
 
+    private func filteredOpportunities(search: String, filter: InterviewFilter) -> [InterviewOpportunity] {
+        store.filteredOpportunities(search: search, filter: filter)
+    }
+
+    private func canApplyFilterChange(search: String, filter: InterviewFilter) -> Bool {
+        guard isEditing, let selectedID = store.selectedOpportunityID else { return true }
+        return filteredOpportunities(search: search, filter: filter).contains { $0.id == selectedID }
+    }
+
     private func reconcileSelection() {
         guard let selectedID = store.selectedOpportunityID else { return }
         guard !opportunities.contains(where: { $0.id == selectedID }) else { return }
+        if isEditing {
+            showCloseEditingConfirmation = true
+            return
+        }
         store.selectedOpportunityID = opportunities.first?.id
         isEditing = false
+    }
+
+    private func requestCloseDetailPane() {
+        if isEditing {
+            showCloseEditingConfirmation = true
+        } else {
+            closeDetailPane()
+        }
+    }
+
+    private func closeDetailPane() {
+        store.selectedOpportunityID = nil
+        isEditing = false
+    }
+
+    private func confirmCloseDetailPane() {
+        applyPendingFilterChanges()
+        closeDetailPane()
+    }
+
+    private func applyPendingFilterChanges() {
+        if let pendingSearchText {
+            searchText = pendingSearchText
+        }
+        if let pendingInterviewFilter {
+            store.interviewFilter = pendingInterviewFilter
+        }
+        clearPendingFilterChanges()
+    }
+
+    private func clearPendingFilterChanges() {
+        pendingSearchText = nil
+        pendingInterviewFilter = nil
     }
 }
 
 private struct InterviewOpportunityDetailView: View {
     @Binding var opportunity: InterviewOpportunity
     @Binding var isEditing: Bool
+    var onClose: () -> Void
     var onDelete: () -> Void
     @State private var showDeleteConfirmation = false
     @State private var selectedTab: InterviewDetailTab = .overview
@@ -366,21 +479,16 @@ private struct InterviewOpportunityDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Spacer()
-
-                    Button {
+                DetailPaneToolbar(
+                    isEditing: isEditing,
+                    onClose: onClose,
+                    onToggleEditing: {
                         isEditing.toggle()
-                    } label: {
-                        Label(isEditing ? "Done" : "Edit", systemImage: isEditing ? "checkmark" : "pencil")
-                    }
-
-                    Button(role: .destructive) {
+                    },
+                    onDelete: {
                         showDeleteConfirmation = true
-                    } label: {
-                        Label("Delete", systemImage: "trash")
                     }
-                }
+                )
 
                 Picker("Detail", selection: $selectedTab) {
                     ForEach(InterviewDetailTab.allCases) { tab in
@@ -396,9 +504,10 @@ private struct InterviewOpportunityDetailView: View {
                 } else {
                     InterviewOpportunityReadOnlyView(opportunity: opportunity, selectedTab: selectedTab)
                 }
-            }
-            .padding(18)
         }
+        .padding(18)
+        }
+        .font(.workLogDetailPaneBody)
         .confirmationDialog(
             "Delete this opportunity?",
             isPresented: $showDeleteConfirmation,
@@ -684,7 +793,7 @@ private struct InterviewOpportunityEditForm: View {
                 }
             }
 
-            Button {
+            IconOnlyActionButton("Add Round", systemImage: "plus.circle") {
                 var round = InterviewRound()
                 round.roundName = "Round \(opportunity.interviewRounds.count + 1)"
                 round.result = RoundOutcomeOption.pending.rawValue
@@ -692,8 +801,6 @@ private struct InterviewOpportunityEditForm: View {
                 if opportunity.status == .invited || opportunity.status == .applied || opportunity.status == .waiting {
                     opportunity.status = .interviewing
                 }
-            } label: {
-                Label("Add Round", systemImage: "plus.circle")
             }
         }
     }
@@ -888,12 +995,9 @@ private struct InterviewRoundEditor: View {
                 DatePicker("", selection: $round.date, displayedComponents: .date)
                     .labelsHidden()
                 TextField("Round", text: $round.roundName)
-                Button(role: .destructive) {
+                IconOnlyActionButton("Delete", systemImage: "trash", role: .destructive) {
                     showDeleteConfirmation = true
-                } label: {
-                    Image(systemName: "trash")
                 }
-                .buttonStyle(.borderless)
             }
 
             TextField("Interviewer", text: $round.interviewer)

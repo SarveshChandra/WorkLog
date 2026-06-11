@@ -27,6 +27,11 @@ struct WorkLogApp: App {
                 }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
 
+                Button("Import Tasks...") {
+                    store.importWorkExperiences()
+                }
+                .keyboardShortcut("i", modifiers: [.command, .option])
+
                 Button("Import Document...") {
                     store.importDocument()
                 }

@@ -9,11 +9,13 @@ struct DocumentsView: View {
     @State private var selectedCompany = ""
     @State private var selectedType = ""
     @State private var isEditing = false
+    @State private var showCloseEditingConfirmation = false
+    @State private var pendingSearchText: String?
+    @State private var pendingSelectedCompany: String?
+    @State private var pendingSelectedType: String?
 
     private var documents: [DocumentRecord] {
-        store.filteredDocuments(search: searchText).filter { document in
-            matchesSelectedCompany(document) && matchesSelectedType(document)
-        }
+        filteredDocuments(search: searchText, company: selectedCompany, type: selectedType)
     }
 
     private var availableCompanies: [String] {
@@ -30,10 +32,34 @@ struct DocumentsView: View {
         }
     }
 
+    private var outlinedRowIndex: Int? {
+        guard let selectedID = store.selectedDocumentID else { return nil }
+        return documents.firstIndex { $0.id == selectedID }
+    }
+
+    private var tableLayoutSignature: Int {
+        var hasher = Hasher()
+        hasher.combine(documents.count)
+        for document in documents {
+            hasher.combine(document.id)
+            hasher.combine(document.displayFileName)
+            hasher.combine(document.kind.rawValue)
+            hasher.combine(document.company)
+            hasher.combine(document.fileSizeBytes)
+            hasher.combine(document.fileModifiedAt)
+            hasher.combine(document.fileCreatedAt)
+        }
+        return hasher.finalize()
+    }
+
     private var selectionBinding: Binding<UUID?> {
         Binding(
             get: { store.selectedDocumentID },
             set: { newValue in
+                if newValue == nil, isEditing, store.selectedDocumentID != nil {
+                    showCloseEditingConfirmation = true
+                    return
+                }
                 store.selectedDocumentID = newValue
                 isEditing = false
             }
@@ -71,72 +97,72 @@ struct DocumentsView: View {
                 .frame(width: 150)
                 .opacity(selectedType.isEmpty ? 0.62 : 1)
 
-                Button {
+                IconOnlyActionButton("Import", systemImage: "square.and.arrow.down") {
                     searchText = ""
                     selectedCompany = ""
                     selectedType = ""
                     store.importDocument()
-                } label: {
-                    Label("Import", systemImage: "square.and.arrow.down")
-                        .foregroundStyle(.secondary)
                 }
             }
 
-            HStack(spacing: 0) {
+            StableDetailPaneLayout(showsDetail: store.selectedDocumentID != nil) {
                 Table(documents, selection: selectionBinding) {
                     TableColumn("Name") { document in
-                        Text(document.displayFileName)
+                        TableValueText(value: document.displayFileName)
                     }
-                    .width(min: 340, ideal: 480)
+                    .width(480)
 
                     TableColumn("Type") { document in
-                        Text(document.kind.rawValue)
+                        TableValueText(value: document.kind.rawValue)
                     }
-                    .width(min: 170, ideal: 210)
-
-                    TableColumn("Version") { document in
-                        Text(document.version)
-                    }
-                    .width(min: 140, ideal: 180)
-
-                    TableColumn("Size") { document in
-                        Text(ByteCountFormatter.string(fromByteCount: document.fileSizeBytes, countStyle: .file))
-                    }
-                    .width(min: 120, ideal: 140)
-
-                    TableColumn("Modified") { document in
-                        Text(document.fileModifiedAt.map(AppDateFormatters.short) ?? "")
-                    }
-                    .width(min: 130, ideal: 150)
-
-                    TableColumn("Created") { document in
-                        Text(document.fileCreatedAt.map(AppDateFormatters.short) ?? "")
-                    }
-                    .width(min: 130, ideal: 150)
+                    .width(210)
 
                     TableColumn("Company") { document in
-                        Text(document.company)
+                        TableValueText(value: document.company)
                     }
-                    .width(min: 220, ideal: 280)
+                    .width(280)
+
+                    TableColumn("Size") { document in
+                        TableValueText(
+                            value: ByteCountFormatter.string(fromByteCount: document.fileSizeBytes, countStyle: .file)
+                        )
+                    }
+                    .width(140)
+
+                    TableColumn("Modified") { document in
+                        TableValueText(value: document.fileModifiedAt.map(AppDateFormatters.short) ?? "")
+                    }
+                    .width(150)
+
+                    TableColumn("Created") { document in
+                        TableValueText(value: document.fileCreatedAt.map(AppDateFormatters.short) ?? "")
+                    }
+                    .width(150)
                 }
                 .frame(minWidth: 0, maxWidth: .infinity)
-                .background(TableHeaderFontInstaller().frame(width: 0, height: 0))
-                .id(store.selectedDocumentID == nil ? "documents-table-full" : "documents-table-detail")
-
+                .background(
+                    TableHeaderFontInstaller(
+                        layoutSignature: tableLayoutSignature,
+                        outlinedRowIndex: outlinedRowIndex
+                    )
+                    .frame(width: 0, height: 0)
+                )
+            } detail: {
                 if let id = store.selectedDocumentID,
                    let binding = store.bindingForDocument(id: id) {
-                    Divider()
-
                     DocumentDetailView(
                         document: binding,
                         isEditing: $isEditing,
-                        availableCompanyOptions: availableCompanies
-                    ) {
-                        store.deleteSelectedDocument()
-                        isEditing = false
-                    }
+                        availableCompanyOptions: availableCompanies,
+                        onClose: {
+                            requestCloseDetailPane()
+                        },
+                        onDelete: {
+                            store.deleteSelectedDocument()
+                            isEditing = false
+                        }
+                    )
                     .id(id)
-                    .frame(minWidth: 340, idealWidth: 400, maxWidth: 500)
                 }
             }
         }
@@ -147,12 +173,33 @@ struct DocumentsView: View {
             normalizeFilters()
             reconcileSelection()
         }
+        .confirmationDialog(
+            "Close the document details?",
+            isPresented: $showCloseEditingConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Close", role: .destructive) {
+                confirmCloseDetailPane()
+            }
+            Button("Cancel", role: .cancel) {
+                clearPendingFilterChanges()
+            }
+        } message: {
+            Text("You are editing this document. Close the right pane?")
+        }
     }
 
     private var searchBinding: Binding<String> {
         Binding(
             get: { searchText },
             set: { newValue in
+                guard canApplyFilterChange(search: newValue, company: selectedCompany, type: selectedType) else {
+                    pendingSearchText = newValue
+                    pendingSelectedCompany = nil
+                    pendingSelectedType = nil
+                    showCloseEditingConfirmation = true
+                    return
+                }
                 searchText = newValue
                 reconcileSelection()
             }
@@ -163,6 +210,13 @@ struct DocumentsView: View {
         Binding(
             get: { selectedCompany },
             set: { newValue in
+                guard canApplyFilterChange(search: searchText, company: newValue, type: selectedType) else {
+                    pendingSelectedCompany = newValue
+                    pendingSearchText = nil
+                    pendingSelectedType = nil
+                    showCloseEditingConfirmation = true
+                    return
+                }
                 selectedCompany = newValue
                 reconcileSelection()
             }
@@ -173,17 +227,77 @@ struct DocumentsView: View {
         Binding(
             get: { selectedType },
             set: { newValue in
+                guard canApplyFilterChange(search: searchText, company: selectedCompany, type: newValue) else {
+                    pendingSelectedType = newValue
+                    pendingSearchText = nil
+                    pendingSelectedCompany = nil
+                    showCloseEditingConfirmation = true
+                    return
+                }
                 selectedType = newValue
                 reconcileSelection()
             }
         )
     }
 
+    private func filteredDocuments(search: String, company: String, type: String) -> [DocumentRecord] {
+        store.filteredDocuments(search: search).filter { document in
+            matchesSelectedCompany(document, selectedCompany: company)
+                && matchesSelectedType(document, selectedType: type)
+        }
+    }
+
+    private func canApplyFilterChange(search: String, company: String, type: String) -> Bool {
+        guard isEditing, let selectedID = store.selectedDocumentID else { return true }
+        return filteredDocuments(search: search, company: company, type: type).contains { $0.id == selectedID }
+    }
+
     private func reconcileSelection() {
         guard let selectedID = store.selectedDocumentID else { return }
         guard !documents.contains(where: { $0.id == selectedID }) else { return }
+        if isEditing {
+            showCloseEditingConfirmation = true
+            return
+        }
         store.selectedDocumentID = documents.first?.id
         isEditing = false
+    }
+
+    private func requestCloseDetailPane() {
+        if isEditing {
+            showCloseEditingConfirmation = true
+        } else {
+            closeDetailPane()
+        }
+    }
+
+    private func closeDetailPane() {
+        store.selectedDocumentID = nil
+        isEditing = false
+    }
+
+    private func confirmCloseDetailPane() {
+        applyPendingFilterChanges()
+        closeDetailPane()
+    }
+
+    private func applyPendingFilterChanges() {
+        if let pendingSearchText {
+            searchText = pendingSearchText
+        }
+        if let pendingSelectedCompany {
+            selectedCompany = pendingSelectedCompany
+        }
+        if let pendingSelectedType {
+            selectedType = pendingSelectedType
+        }
+        clearPendingFilterChanges()
+    }
+
+    private func clearPendingFilterChanges() {
+        pendingSearchText = nil
+        pendingSelectedCompany = nil
+        pendingSelectedType = nil
     }
 
     private func normalizeFilters() {
@@ -201,11 +315,19 @@ struct DocumentsView: View {
     }
 
     private func matchesSelectedCompany(_ document: DocumentRecord) -> Bool {
+        matchesSelectedCompany(document, selectedCompany: selectedCompany)
+    }
+
+    private func matchesSelectedType(_ document: DocumentRecord) -> Bool {
+        matchesSelectedType(document, selectedType: selectedType)
+    }
+
+    private func matchesSelectedCompany(_ document: DocumentRecord, selectedCompany: String) -> Bool {
         guard !selectedCompany.isEmpty else { return true }
         return document.company.collapsedWhitespace.localizedCaseInsensitiveCompare(selectedCompany) == .orderedSame
     }
 
-    private func matchesSelectedType(_ document: DocumentRecord) -> Bool {
+    private func matchesSelectedType(_ document: DocumentRecord, selectedType: String) -> Bool {
         guard !selectedType.isEmpty else { return true }
         return document.kind.rawValue == selectedType
     }
@@ -216,6 +338,7 @@ private struct DocumentDetailView: View {
     @Binding var document: DocumentRecord
     @Binding var isEditing: Bool
     var availableCompanyOptions: [String]
+    var onClose: () -> Void
     var onDelete: () -> Void
     @State private var showDeleteConfirmation = false
     @State private var draftFileName: String = ""
@@ -223,43 +346,24 @@ private struct DocumentDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Spacer()
-
-                    Button {
-                        if isEditing {
-                            // Leaving edit mode: apply file rename if needed.
-                            let trimmedDraft = draftFileName.trimmingCharacters(in: .whitespacesAndNewlines)
-                            let currentName = document.storedFileName.isBlank ? document.name : document.storedFileName
-                            if !trimmedDraft.isEmpty, trimmedDraft != currentName {
-                                store.renameDocument(id: document.id, to: trimmedDraft)
-                            }
-                        } else {
-                            draftFileName = document.storedFileName.isBlank ? document.name : document.storedFileName
-                        }
-                        isEditing.toggle()
-                    } label: {
-                        Label(isEditing ? "Done" : "Edit", systemImage: isEditing ? "checkmark" : "pencil")
-                    }
-
-                    Button(role: .destructive) {
+                DetailPaneToolbar(
+                    isEditing: isEditing,
+                    onClose: onClose,
+                    onToggleEditing: {
+                        toggleEditing()
+                    },
+                    onDelete: {
                         showDeleteConfirmation = true
-                    } label: {
-                        Label("Delete", systemImage: "trash")
                     }
-                }
+                )
 
-                HStack {
-                    Button {
+                HStack(spacing: 8) {
+                    IconOnlyActionButton("Open", systemImage: "doc") {
                         store.openDocument(document)
-                    } label: {
-                        Label("Open", systemImage: "doc")
                     }
 
-                    Button {
+                    IconOnlyActionButton("Reveal", systemImage: "folder") {
                         store.revealDocument(document)
-                    } label: {
-                        Label("Reveal", systemImage: "folder")
                     }
                 }
 
@@ -281,9 +385,10 @@ private struct DocumentDetailView: View {
                 } else {
                     DocumentReadOnlyView(document: document)
                 }
-            }
-            .padding(18)
         }
+        .padding(18)
+        }
+        .font(.workLogDetailPaneBody)
         .confirmationDialog(
             "Delete this document?",
             isPresented: $showDeleteConfirmation,
@@ -294,6 +399,25 @@ private struct DocumentDetailView: View {
         } message: {
             Text("This will permanently remove the selected document.")
         }
+        .onDisappear {
+            commitPendingRename()
+        }
+    }
+
+    private func toggleEditing() {
+        if isEditing {
+            commitPendingRename()
+        } else {
+            draftFileName = document.storedFileName.isBlank ? document.name : document.storedFileName
+        }
+        isEditing.toggle()
+    }
+
+    private func commitPendingRename() {
+        let trimmedDraft = draftFileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let currentName = document.storedFileName.isBlank ? document.name : document.storedFileName
+        guard !trimmedDraft.isEmpty, trimmedDraft != currentName else { return }
+        store.renameDocument(id: document.id, to: trimmedDraft)
     }
 }
 
@@ -438,7 +562,6 @@ private struct DocumentReadOnlyView: View {
         VStack(alignment: .leading, spacing: 14) {
             ReadOnlyDetailField(title: "Name", value: displayName, hideWhenEmpty: false)
             ReadOnlyDetailField(title: "Type", value: document.kind.rawValue, hideWhenEmpty: false)
-            ReadOnlyDetailField(title: "Version", value: document.version)
             ReadOnlyDetailField(title: "Size", value: ByteCountFormatter.string(fromByteCount: document.fileSizeBytes, countStyle: .file), hideWhenEmpty: false)
             ReadOnlyDetailField(title: "Modified", value: document.fileModifiedAt.map(AppDateFormatters.short) ?? "", hideWhenEmpty: false)
             ReadOnlyDetailField(title: "Created", value: document.fileCreatedAt.map(AppDateFormatters.short) ?? "", hideWhenEmpty: false)
@@ -468,10 +591,6 @@ private struct DocumentEditForm: View {
                 }
                 .labelsHidden()
                 .frame(maxWidth: 190)
-            }
-
-            FieldRow(title: "Version") {
-                TextField("Version", text: $document.version)
             }
 
             ReadOnlyDetailField(title: "Size", value: ByteCountFormatter.string(fromByteCount: document.fileSizeBytes, countStyle: .file), hideWhenEmpty: false)

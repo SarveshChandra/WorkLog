@@ -30,6 +30,5 @@ struct ContentView: View {
         .preferredColorScheme(store.theme.colorScheme)
         .tint(.workLogSkyBlue)
         .background(Color(nsColor: .windowBackgroundColor))
-        .background(TableHeaderFontInstaller().frame(width: 0, height: 0))
     }
 }
