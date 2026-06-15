@@ -29,6 +29,10 @@ extension ShapeStyle where Self == Color {
     static var workLogPendingCream: Color {
         Color(red: 0.99, green: 0.96, blue: 0.88)
     }
+
+    static var workLogPlaceholderText: Color {
+        Color.secondary.opacity(0.34)
+    }
 }
 
 extension Font {
@@ -100,6 +104,15 @@ extension View {
     }
 }
 
+extension String {
+    func workLogDisplayColor(isSecondary: Bool = false) -> Color {
+        if isWorkLogPlaceholderValue {
+            return .workLogPlaceholderText
+        }
+        return isSecondary ? .secondary : .primary
+    }
+}
+
 private struct WorkLogHoverOutlineModifier: ViewModifier {
     var cornerRadius: CGFloat
     @State private var isHovering = false
@@ -143,7 +156,7 @@ struct TableValueText: View {
     var body: some View {
         Text(value)
             .font(style.font)
-            .foregroundStyle(isSecondary ? Color.secondary : Color.primary)
+            .foregroundStyle(value.workLogDisplayColor(isSecondary: isSecondary))
             .multilineTextAlignment(.leading)
             .lineLimit(nil)
             .fixedSize(horizontal: false, vertical: true)
@@ -318,7 +331,7 @@ struct SingleSelectAddablePicker: View {
                 Text(summaryText)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                    .foregroundStyle(selectedValue.isBlank ? .secondary : .primary)
+                    .foregroundStyle(selectedValue.isBlank ? .workLogPlaceholderText : .primary)
                 Spacer(minLength: 12)
                 Image(systemName: "chevron.down")
                     .font(.caption)
@@ -337,7 +350,7 @@ struct SingleSelectAddablePicker: View {
                         .font(.headline)
                     Text(selectedValue.isBlank ? emptySelectionText : selectedValue)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(selectedValue.isBlank ? .workLogPlaceholderText : .secondary)
                 }
 
                 HStack(spacing: 6) {
@@ -405,7 +418,7 @@ struct SingleSelectAddablePicker: View {
                         if filteredOptions.isEmpty && pendingNewOption == nil {
                             Text(noMatchesText)
                                 .font(.callout)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.workLogPlaceholderText)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.vertical, 8)
                         }
@@ -543,7 +556,7 @@ struct OptionalDatePicker: View {
                     .labelsHidden()
             } else {
                 Text("Not set")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.workLogPlaceholderText)
             }
 
             Spacer()
@@ -585,7 +598,7 @@ struct OptionalIntStepper: View {
                 }
             } else {
                 Text("Not set")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.workLogPlaceholderText)
             }
 
             Spacer()
@@ -641,6 +654,7 @@ struct ReadOnlyDetailField: View {
                     .foregroundStyle(.workLogHeaderText)
                 Text(value.isBlank ? "Not set" : value)
                     .font(.workLogDetailPaneBody)
+                    .foregroundStyle((value.isBlank ? "Not set" : value).workLogDisplayColor(isSecondary: false))
                     .lineSpacing(2)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)

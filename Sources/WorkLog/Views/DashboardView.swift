@@ -555,7 +555,7 @@ private struct InsightRow: View {
             Text(text)
                 .font(.body)
                 .lineSpacing(3)
-                .foregroundStyle(.primary.opacity(0.9))
+                .foregroundStyle(text.workLogDisplayColor())
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
         }

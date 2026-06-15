@@ -113,7 +113,7 @@ struct SettingsView: View {
                     SettingsSectionContent {
                         Text(store.statusMessage.isBlank ? "Ready" : store.statusMessage)
                             .font(.callout)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle((store.statusMessage.isBlank ? "Ready" : store.statusMessage).workLogDisplayColor(isSecondary: true))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
@@ -155,7 +155,7 @@ private struct SettingsValueRow: View {
                 .foregroundStyle(.workLogHeaderText)
             Text(value)
                 .font(.body)
-                .foregroundStyle(.primary.opacity(0.92))
+                .foregroundStyle(value.workLogDisplayColor())
         }
     }
 }
@@ -180,7 +180,7 @@ private struct SettingsPathValue: View {
     var body: some View {
         Text(text)
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(text.workLogDisplayColor(isSecondary: true))
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
             .lineSpacing(2)

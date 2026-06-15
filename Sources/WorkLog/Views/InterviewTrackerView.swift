@@ -688,7 +688,7 @@ private struct InterviewOpportunityEditForm: View {
                     .frame(maxWidth: 180)
                 } else {
                     Text(opportunity.displayStatus.isBlank ? "Not set" : opportunity.displayStatus)
-                        .foregroundStyle(opportunity.displayStatus.isBlank ? .secondary : .primary)
+                        .foregroundStyle((opportunity.displayStatus.isBlank ? "Not set" : opportunity.displayStatus).workLogDisplayColor())
                 }
             }
 
@@ -699,7 +699,7 @@ private struct InterviewOpportunityEditForm: View {
 
             InterviewEditField(title: "Round") {
                 Text(opportunity.calculatedStage.isBlank ? "Not set" : opportunity.calculatedStage)
-                    .foregroundStyle(opportunity.calculatedStage.isBlank ? .secondary : .primary)
+                    .foregroundStyle((opportunity.calculatedStage.isBlank ? "Not set" : opportunity.calculatedStage).workLogDisplayColor())
             }
 
             InterviewEditField(title: "Last Activity") {
@@ -977,8 +977,9 @@ private struct InterviewCooldownField: View {
                 .disabled(!isEditable)
                 .opacity(isEditable ? 1 : 0.55)
             } else {
-                Text(isEditable ? "Not set" : "Set a cooldown-eligible status first")
-                    .foregroundStyle(.secondary)
+                let message = isEditable ? "Not set" : "Set a cooldown-eligible status first"
+                Text(message)
+                    .foregroundStyle(isEditable ? message.workLogDisplayColor() : .workLogPlaceholderText)
             }
         }
     }

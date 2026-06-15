@@ -166,6 +166,16 @@ final class InterviewAndDocumentLogicTests: XCTestCase {
         XCTAssertEqual(designations, ["iOS Engineer", "Staff Engineer"])
     }
 
+    func testWorkLogPlaceholderValuesIdentifyFallbackLabels() {
+        XCTAssertTrue("Unknown".isWorkLogPlaceholderValue)
+        XCTAssertTrue("Untitled subtask".isWorkLogPlaceholderValue)
+        XCTAssertTrue("No subtasks yet. Use Edit to add a simple checklist.".isWorkLogPlaceholderValue)
+        XCTAssertTrue("Ready".isWorkLogPlaceholderValue)
+        XCTAssertFalse("Ready for review".isWorkLogPlaceholderValue)
+        XCTAssertFalse("No task dates are set. Duration, overdue, and due-date logic stay off until you enable dates.".isWorkLogPlaceholderValue)
+        XCTAssertFalse("Set a cooldown-eligible status first".isWorkLogPlaceholderValue)
+    }
+
     func testWorkExperienceLegacyDateDecodesIntoStartDate() throws {
         let legacyDate = Date(timeIntervalSince1970: 1_700_000_000)
         let json = """

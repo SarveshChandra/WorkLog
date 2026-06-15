@@ -128,40 +128,12 @@ struct WorkExperienceView: View {
 
             StableDetailPaneLayout(showsDetail: store.selectedWorkID != nil) {
                 Table(entries, selection: selectionBinding) {
-                    TableColumn("Company") { entry in
+                    TableColumn("Task") { entry in
                         WorkExperienceTableCell {
-                            WorkExperienceTableText(entry.company)
+                            WorkExperienceTableText(entry.task.isBlank ? "Untitled task" : entry.task)
                         }
                     }
-                    .width(240)
-
-                    TableColumn("Designation") { entry in
-                        WorkExperienceTableCell {
-                            WorkExperienceTableText(entry.designation)
-                        }
-                    }
-                    .width(260)
-
-                    TableColumn("Role") { entry in
-                        WorkExperienceTableCell {
-                            WorkExperienceTableText(entry.role)
-                        }
-                    }
-                    .width(260)
-
-                    TableColumn("Product / Project") { entry in
-                        WorkExperienceTableCell {
-                            WorkExperienceTableText(entry.projectProduct)
-                        }
-                    }
-                    .width(280)
-
-                    TableColumn("Team") { entry in
-                        WorkExperienceTableCell {
-                            WorkExperienceTableText(entry.team)
-                        }
-                    }
-                    .width(220)
+                    .width(420)
 
                     TableColumn("Feature") { entry in
                         WorkExperienceTableCell {
@@ -170,12 +142,40 @@ struct WorkExperienceView: View {
                     }
                     .width(260)
 
-                    TableColumn("Task") { entry in
+                    TableColumn("Team") { entry in
                         WorkExperienceTableCell {
-                            WorkExperienceTableText(entry.task.isBlank ? "Untitled task" : entry.task)
+                            WorkExperienceTableText(entry.team)
                         }
                     }
-                    .width(420)
+                    .width(220)
+
+                    TableColumn("Product / Project") { entry in
+                        WorkExperienceTableCell {
+                            WorkExperienceTableText(entry.projectProduct)
+                        }
+                    }
+                    .width(280)
+
+                    TableColumn("Role") { entry in
+                        WorkExperienceTableCell {
+                            WorkExperienceTableText(entry.role)
+                        }
+                    }
+                    .width(260)
+
+                    TableColumn("Designation") { entry in
+                        WorkExperienceTableCell {
+                            WorkExperienceTableText(entry.designation)
+                        }
+                    }
+                    .width(260)
+
+                    TableColumn("Company") { entry in
+                        WorkExperienceTableCell {
+                            WorkExperienceTableText(entry.company)
+                        }
+                    }
+                    .width(240)
 
                     TableColumn("Duration") { entry in
                         WorkExperienceTableCell {
@@ -738,14 +738,14 @@ private struct WorkExperiencePlannerEditor: View {
                 if !entry.usesDateLogic {
                     Text("Task dates are off. This plan behaves like a checklist until you enable dates in Overview.")
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.workLogPlaceholderText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if entry.subtasks.isEmpty {
                     Text("No subtasks yet.")
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle("No subtasks yet.".workLogDisplayColor(isSecondary: true))
                 } else {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(Array(entry.subtasks.indices), id: \.self) { index in
@@ -861,7 +861,7 @@ private struct WorkExperiencePlannerSummaryView: View {
             if entry.totalSubtaskCount == 0 {
                 Text(emptyMessage)
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(emptyMessage.workLogDisplayColor(isSecondary: true))
                     .fixedSize(horizontal: false, vertical: true)
             } else if entry.plannerStatus == .done {
                 Text("All subtasks are done.")
@@ -896,6 +896,7 @@ private struct WorkExperiencePlannerReadOnlyRow: View {
                 .frame(width: 16)
 
             Text(subtask.displayTitle)
+                .foregroundStyle(subtask.displayTitle.workLogDisplayColor())
                 .fixedSize(horizontal: false, vertical: true)
 
             Spacer(minLength: 12)
@@ -1102,11 +1103,11 @@ private struct WorkExperienceDateRangeEditor: View {
 
                     Text(entry.dateSummaryText)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(entry.dateSummaryText.workLogDisplayColor(isSecondary: true))
                 } else {
                     Text("No task dates are set. Duration, overdue, and due-date logic stay off until you enable dates.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.workLogPlaceholderText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -1159,7 +1160,7 @@ private struct MultiSelectTagMenu: View {
             HStack {
                 Text(tags.isBlank ? "Select tags" : tags)
                     .lineLimit(2)
-                    .foregroundStyle(tags.isBlank ? .secondary : .primary)
+                    .foregroundStyle((tags.isBlank ? "Select tags" : tags).workLogDisplayColor())
                 Spacer()
                 Image(systemName: "chevron.down")
                     .font(.caption)
