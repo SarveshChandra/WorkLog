@@ -27,6 +27,13 @@ enum AppDateFormatters {
         return formatter
     }()
 
+    static let calendarDateTime: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
     static func short(_ date: Date?) -> String {
         guard let date else { return "" }
         if Calendar.current.isDate(date, equalTo: Date(), toGranularity: .year) {

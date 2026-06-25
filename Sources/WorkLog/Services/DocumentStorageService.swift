@@ -3,6 +3,20 @@ import CoreServices
 import Darwin
 import Foundation
 
+enum DocumentStorageError: LocalizedError {
+    case duplicateNameInDirectory(fileName: String, company: String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .duplicateNameInDirectory(fileName, company):
+            if company.isBlank {
+                return "A document named \"\(fileName)\" already exists in the root Documents folder. Change the file name or set Company so it saves in a different directory."
+            }
+            return "A document named \"\(fileName)\" already exists in the \(company) folder. Change the file name or choose a different company."
+        }
+    }
+}
+
 final class DocumentStorageService {
     let documentsDirectory: URL
 
@@ -33,14 +47,14 @@ final class DocumentStorageService {
             name: destinationURL.lastPathComponent,
             kind: inferKind(from: sourceURL),
             originalFileName: sourceURL.lastPathComponent,
-            storedFileName: destinationURL.lastPathComponent
+            storedFileName: storedPath(for: destinationURL)
         )
         record = refreshMetadata(for: record)
         return record
     }
 
     func fileURL(for document: DocumentRecord) -> URL {
-        documentsDirectory.appendingPathComponent(document.storedFileName)
+        resolvedFileURL(forStoredPath: document.storedFileName)
     }
 
     func refreshMetadata(for document: DocumentRecord, loadVersionMetadata: Bool = true) -> DocumentRecord {
@@ -78,31 +92,159 @@ final class DocumentStorageService {
     }
 
     func renameDocument(_ document: DocumentRecord, to newFileName: String) throws -> DocumentRecord {
-        let trimmed = newFileName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return document }
+        try updateDocument(document, desiredFileName: newFileName, company: document.company)
+    }
 
+    func updateDocument(_ document: DocumentRecord, desiredFileName: String, company: String) throws -> DocumentRecord {
+        let normalizedCompany = company.collapsedWhitespace
         let currentURL = fileURL(for: document)
-        guard FileManager.default.fileExists(atPath: currentURL.path) else { return document }
+        guard FileManager.default.fileExists(atPath: currentURL.path) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
 
+        let requestedName = desiredFileName.trimmingCharacters(in: .whitespacesAndNewlines)
         let desiredName = fileNameKeepingCurrentExtension(
-            sanitizeFileName(trimmed),
+            sanitizeFileName(requestedName.isEmpty ? currentURL.lastPathComponent : requestedName),
             currentFileName: currentURL.lastPathComponent
         )
         guard !desiredName.isEmpty else { return document }
-        let destinationURL = destinationURLForRename(
+
+        let destinationDirectory = directoryURL(forCompany: normalizedCompany)
+        let destinationURL = try destinationURLForUpdate(
             currentURL: currentURL,
-            desiredFileName: desiredName
+            desiredFileName: desiredName,
+            destinationDirectory: destinationDirectory,
+            company: normalizedCompany
         )
 
-        if destinationURL.lastPathComponent != currentURL.lastPathComponent {
+        if destinationURL.standardizedFileURL.path != currentURL.standardizedFileURL.path {
             try moveItemForRename(from: currentURL, to: destinationURL)
+            cleanupEmptyDirectories(startingAt: currentURL.deletingLastPathComponent())
         }
 
         var updated = document
+        updated.company = normalizedCompany
         updated.name = destinationURL.lastPathComponent
-        updated.storedFileName = destinationURL.lastPathComponent
+        updated.storedFileName = storedPath(for: destinationURL)
         updated = refreshMetadata(for: updated)
         return updated
+    }
+
+    func updateDocumentsForCompanyRename(
+        _ documents: [DocumentRecord],
+        from oldCompany: String,
+        to newCompany: String,
+        selectedDocumentID: UUID? = nil,
+        selectedDesiredFileName: String? = nil
+    ) throws -> [DocumentRecord] {
+        let normalizedOldCompany = oldCompany.collapsedWhitespace
+        let normalizedNewCompany = newCompany.collapsedWhitespace
+        guard !normalizedOldCompany.isEmpty else { return documents }
+
+        let sourceDirectory = directoryURL(forCompany: normalizedOldCompany)
+        let targetDirectory = directoryURL(forCompany: normalizedNewCompany)
+
+        struct PreparedMove {
+            var document: DocumentRecord
+            let currentURL: URL
+            let destinationURL: URL
+        }
+
+        var currentURLsByPath: [String: URL] = [:]
+        for document in documents {
+            let url = fileURL(for: document)
+            let pathKey = normalizedStoredPathKey(storedPath(for: url))
+            if let existingURL = currentURLsByPath[pathKey],
+               !referencesSameFile(existingURL, url) {
+                throw DocumentStorageError.duplicateNameInDirectory(
+                    fileName: url.lastPathComponent,
+                    company: document.company
+                )
+            }
+            currentURLsByPath[pathKey] = url
+        }
+
+        var plannedDestinationPaths = Set<String>()
+        var preparedMoves: [PreparedMove] = []
+
+        for document in documents {
+            let currentURL = fileURL(for: document)
+            guard FileManager.default.fileExists(atPath: currentURL.path) else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+
+            let requestedFileName = document.id == selectedDocumentID ? selectedDesiredFileName ?? "" : ""
+            let desiredName = fileNameKeepingCurrentExtension(
+                sanitizeFileName(
+                    requestedFileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? currentURL.lastPathComponent
+                        : requestedFileName
+                ),
+                currentFileName: currentURL.lastPathComponent
+            )
+            guard !desiredName.isEmpty else { continue }
+
+            let destinationURL = targetDirectory.appendingPathComponent(desiredName)
+            let destinationPathKey = normalizedStoredPathKey(storedPath(for: destinationURL))
+
+            if !plannedDestinationPaths.insert(destinationPathKey).inserted {
+                throw DocumentStorageError.duplicateNameInDirectory(fileName: desiredName, company: normalizedNewCompany)
+            }
+
+            if let batchCurrentURL = currentURLsByPath[destinationPathKey],
+               !referencesSameFile(currentURL, batchCurrentURL) {
+                throw DocumentStorageError.duplicateNameInDirectory(fileName: desiredName, company: normalizedNewCompany)
+            }
+
+            if FileManager.default.fileExists(atPath: destinationURL.path),
+               !referencesSameFile(currentURL, destinationURL) {
+                throw DocumentStorageError.duplicateNameInDirectory(fileName: desiredName, company: normalizedNewCompany)
+            }
+
+            preparedMoves.append(
+                PreparedMove(
+                    document: document,
+                    currentURL: currentURL,
+                    destinationURL: destinationURL
+                )
+            )
+        }
+
+        if normalizedOldCompany != normalizedNewCompany,
+           sourceDirectory.path.caseInsensitiveCompare(targetDirectory.path) == .orderedSame,
+           FileManager.default.fileExists(atPath: sourceDirectory.path) {
+            try moveDirectoryForRename(from: sourceDirectory, to: targetDirectory)
+            preparedMoves = preparedMoves.map { move in
+                var updatedMove = move
+                updatedMove.document.company = normalizedNewCompany
+                let currentName = move.currentURL.lastPathComponent
+                updatedMove = PreparedMove(
+                    document: updatedMove.document,
+                    currentURL: targetDirectory.appendingPathComponent(currentName),
+                    destinationURL: move.destinationURL
+                )
+                return updatedMove
+            }
+        } else {
+            try FileManager.default.createDirectory(at: targetDirectory, withIntermediateDirectories: true)
+        }
+
+        var updatedDocuments: [DocumentRecord] = []
+        for move in preparedMoves {
+            if move.currentURL.standardizedFileURL.path != move.destinationURL.standardizedFileURL.path {
+                try moveItemForRename(from: move.currentURL, to: move.destinationURL)
+            }
+
+            var updated = move.document
+            updated.company = normalizedNewCompany
+            updated.name = move.destinationURL.lastPathComponent
+            updated.storedFileName = storedPath(for: move.destinationURL)
+            updated = refreshMetadata(for: updated)
+            updatedDocuments.append(updated)
+        }
+
+        cleanupEmptyDirectories(startingAt: sourceDirectory)
+        return updatedDocuments
     }
 
     func persistVersionMetadata(_ version: String, for document: DocumentRecord) {
@@ -119,28 +261,40 @@ final class DocumentStorageService {
 
     func recordsForExistingFiles(excluding storedFileNames: Set<String>) throws -> [DocumentRecord] {
         guard FileManager.default.fileExists(atPath: documentsDirectory.path) else { return [] }
-        let normalizedStoredFileNames = Set(storedFileNames.map(normalizedFileNameKey))
+        let normalizedStoredFileNames = Set(storedFileNames.map(normalizedStoredPathKey))
 
-        let files = try FileManager.default.contentsOfDirectory(
+        guard let enumerator = FileManager.default.enumerator(
             at: documentsDirectory,
             includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles]
-        )
+        ) else {
+            return []
+        }
 
-        return files.compactMap { url in
+        var recovered: [DocumentRecord] = []
+        for case let url as URL in enumerator {
             guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
-                return nil
+                continue
             }
-            guard !normalizedStoredFileNames.contains(normalizedFileNameKey(url.lastPathComponent)) else { return nil }
 
+            let relativeStoredPath = storedPath(for: url)
+            guard !normalizedStoredFileNames.contains(normalizedStoredPathKey(relativeStoredPath)) else {
+                continue
+            }
+
+            let relativeComponents = relativeStoredPath.split(separator: "/").map(String.init)
+            let company = relativeComponents.count > 1 ? relativeComponents[0] : ""
             let record = DocumentRecord(
                 name: url.lastPathComponent,
                 kind: inferKind(from: url),
+                company: company,
                 originalFileName: url.lastPathComponent,
-                storedFileName: url.lastPathComponent
+                storedFileName: relativeStoredPath
             )
-            return refreshMetadata(for: record)
+            recovered.append(refreshMetadata(for: record))
         }
+
+        return recovered
     }
 
     func open(_ document: DocumentRecord) {
@@ -160,6 +314,7 @@ final class DocumentStorageService {
             }
 
             let destination = fileURL(for: document)
+            try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
             let fileExists = FileManager.default.fileExists(atPath: destination.path)
             guard !fileExists || demoPDFNeedsRewrite(document: document, url: destination) else {
                 continue
@@ -190,8 +345,19 @@ final class DocumentStorageService {
         if lowercasedName.contains("resume") || lowercasedName.contains("cv") {
             return .resume
         }
+        if lowercasedName.contains("cover") && lowercasedName.contains("letter")
+            || lowercasedName.contains("coverletter") {
+            return .coverLetter
+        }
         if lowercasedName.contains("offer") {
             return .offerLetter
+        }
+        if lowercasedName.contains("appointment")
+            || lowercasedName.contains("joining letter")
+            || lowercasedName.contains("joining_")
+            || lowercasedName.contains("joining-")
+            || lowercasedName.contains("joining ") {
+            return .appointmentLetter
         }
         if lowercasedName.contains("relieving") {
             return .relievingLetter
@@ -219,6 +385,13 @@ final class DocumentStorageService {
         value.folding(options: [.caseInsensitive], locale: nil)
     }
 
+    private func normalizedStoredPathKey(_ value: String) -> String {
+        value
+            .split(separator: "/")
+            .map { normalizedFileNameKey(String($0)) }
+            .joined(separator: "/")
+    }
+
     private func fileNameKeepingCurrentExtension(_ desiredFileName: String, currentFileName: String) -> String {
         let desiredURL = URL(fileURLWithPath: desiredFileName)
         guard desiredURL.pathExtension.isEmpty else { return desiredFileName }
@@ -229,7 +402,11 @@ final class DocumentStorageService {
     }
 
     private func uniqueDestinationURL(desiredFileName: String) -> URL {
-        let desired = documentsDirectory.appendingPathComponent(desiredFileName)
+        uniqueDestinationURL(desiredFileName: desiredFileName, in: documentsDirectory)
+    }
+
+    private func uniqueDestinationURL(desiredFileName: String, in directory: URL) -> URL {
+        let desired = directory.appendingPathComponent(desiredFileName)
         if !FileManager.default.fileExists(atPath: desired.path) {
             return desired
         }
@@ -237,7 +414,7 @@ final class DocumentStorageService {
         let ext = desired.pathExtension
         let suffix = UUID().uuidString.prefix(6)
         let finalName = ext.isEmpty ? "\(base)-\(suffix)" : "\(base)-\(suffix).\(ext)"
-        return documentsDirectory.appendingPathComponent(finalName)
+        return directory.appendingPathComponent(finalName)
     }
 
     private func destinationURLForRename(currentURL: URL, desiredFileName: String) -> URL {
@@ -255,12 +432,50 @@ final class DocumentStorageService {
         return uniqueDestinationURL(desiredFileName: desiredFileName)
     }
 
+    private func destinationURLForUpdate(
+        currentURL: URL,
+        desiredFileName: String,
+        destinationDirectory: URL,
+        company: String
+    ) throws -> URL {
+        try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+        let desiredURL = destinationDirectory.appendingPathComponent(desiredFileName)
+
+        if desiredURL.path.caseInsensitiveCompare(currentURL.path) == .orderedSame,
+           referencesSameFile(currentURL, desiredURL) {
+            return desiredURL
+        }
+
+        if FileManager.default.fileExists(atPath: desiredURL.path),
+           !referencesSameFile(currentURL, desiredURL) {
+            throw DocumentStorageError.duplicateNameInDirectory(fileName: desiredFileName, company: company)
+        }
+
+        return desiredURL
+    }
+
     private func moveItemForRename(from sourceURL: URL, to destinationURL: URL) throws {
+        try FileManager.default.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         if sourceURL.deletingLastPathComponent() == destinationURL.deletingLastPathComponent(),
            sourceURL.lastPathComponent.caseInsensitiveCompare(destinationURL.lastPathComponent) == .orderedSame {
             let temporaryURL = uniqueDestinationURL(
-                desiredFileName: ".rename-\(UUID().uuidString)-\(sourceURL.lastPathComponent)"
+                desiredFileName: ".rename-\(UUID().uuidString)-\(sourceURL.lastPathComponent)",
+                in: sourceURL.deletingLastPathComponent()
             )
+            try FileManager.default.moveItem(at: sourceURL, to: temporaryURL)
+            try FileManager.default.moveItem(at: temporaryURL, to: destinationURL)
+            return
+        }
+
+        try FileManager.default.moveItem(at: sourceURL, to: destinationURL)
+    }
+
+    private func moveDirectoryForRename(from sourceURL: URL, to destinationURL: URL) throws {
+        try FileManager.default.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+        if sourceURL.path.caseInsensitiveCompare(destinationURL.path) == .orderedSame {
+            let temporaryURL = sourceURL.deletingLastPathComponent()
+                .appendingPathComponent(".rename-\(UUID().uuidString)")
             try FileManager.default.moveItem(at: sourceURL, to: temporaryURL)
             try FileManager.default.moveItem(at: temporaryURL, to: destinationURL)
             return
@@ -282,6 +497,46 @@ final class DocumentStorageService {
             return false
         }
         return leftIdentifier.isEqual(rightIdentifier)
+    }
+
+    private func resolvedFileURL(forStoredPath storedPath: String) -> URL {
+        let components = storedPath.split(separator: "/").map(String.init)
+        guard !components.isEmpty else { return documentsDirectory }
+        return components.reduce(documentsDirectory) { partial, component in
+            partial.appendingPathComponent(component)
+        }
+    }
+
+    private func directoryURL(forCompany company: String) -> URL {
+        let normalizedCompany = sanitizeFileName(company.collapsedWhitespace)
+        guard !normalizedCompany.isEmpty else { return documentsDirectory }
+        return documentsDirectory.appendingPathComponent(normalizedCompany, isDirectory: true)
+    }
+
+    private func storedPath(for url: URL) -> String {
+        let basePath = documentsDirectory.standardizedFileURL.path
+        let filePath = url.standardizedFileURL.path
+        guard filePath.hasPrefix(basePath + "/") else {
+            return url.lastPathComponent
+        }
+        return String(filePath.dropFirst(basePath.count + 1))
+    }
+
+    private func cleanupEmptyDirectories(startingAt directoryURL: URL) {
+        var current = directoryURL.standardizedFileURL
+        let base = documentsDirectory.standardizedFileURL
+
+        while current.path != base.path {
+            let contents = (try? FileManager.default.contentsOfDirectory(
+                at: current,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )) ?? []
+
+            guard contents.isEmpty else { return }
+            try? FileManager.default.removeItem(at: current)
+            current = current.deletingLastPathComponent()
+        }
     }
 
     private func fileVersionFromXattr(url: URL) -> String? {
@@ -324,7 +579,7 @@ final class DocumentStorageService {
     }
 
     private func demoPDFNeedsRewrite(document: DocumentRecord, url: URL) -> Bool {
-        guard document.storedFileName.hasPrefix("demo-") else { return false }
+        guard URL(fileURLWithPath: document.storedFileName).lastPathComponent.hasPrefix("demo-") else { return false }
         return getXattr(name: "com.worklog.demoPDFVersion", url: url) != "2"
     }
 

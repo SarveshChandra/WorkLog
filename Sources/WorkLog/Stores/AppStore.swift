@@ -2,6 +2,17 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+enum InterviewOpportunitySaveError: LocalizedError {
+    case roundValidation(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .roundValidation(let message):
+            return message
+        }
+    }
+}
+
 @MainActor
 final class AppStore: ObservableObject {
     @Published var data: AppData
@@ -11,6 +22,8 @@ final class AppStore: ObservableObject {
     @Published var selectedDocumentID: UUID?
     @Published var interviewFilter: InterviewFilter = .all
     @Published var statusMessage: String = ""
+    @Published var calendarInterviewImportMessage: String = ""
+    @Published var isImportingCalendarInterviews = false
     @Published var theme: AppTheme {
         didSet {
             UserDefaults.standard.set(theme.rawValue, forKey: Self.themeDefaultsKey)
@@ -20,6 +33,7 @@ final class AppStore: ObservableObject {
     private let persistence: DataPersistenceService
     private let backupService: BackupService
     private let documentService: DocumentStorageService
+    private let calendarInterviewService = AppleCalendarInterviewService()
     private static let themeDefaultsKey = "WorkLog.theme"
 
     init() {
@@ -75,18 +89,18 @@ final class AppStore: ObservableObject {
         Self.availableWorkExperienceOptions(in: data, for: keyPath)
     }
 
-    static func availableCompanies(in data: AppData) -> [String] {
+    nonisolated static func availableCompanies(in data: AppData) -> [String] {
         availableNormalizedOptions(data.workExperiences.map(\.company) + data.documents.map(\.company))
     }
 
-    static func availableWorkExperienceOptions(
+    nonisolated static func availableWorkExperienceOptions(
         in data: AppData,
         for keyPath: KeyPath<WorkExperience, String>
     ) -> [String] {
         availableNormalizedOptions(data.workExperiences.map { $0[keyPath: keyPath] })
     }
 
-    private static func availableNormalizedOptions(_ values: [String]) -> [String] {
+    nonisolated private static func availableNormalizedOptions(_ values: [String]) -> [String] {
         var uniqueValuesByKey: [String: String] = [:]
 
         for value in values {
@@ -106,6 +120,14 @@ final class AppStore: ObservableObject {
         return uniqueValuesByKey.values.sorted {
             $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
         }
+    }
+
+    nonisolated static func shouldRenameDocumentCompanyDirectory(from oldCompany: String, to newCompany: String) -> Bool {
+        let normalizedOldCompany = oldCompany.collapsedWhitespace
+        let normalizedNewCompany = newCompany.collapsedWhitespace
+        return !normalizedOldCompany.isEmpty
+            && !normalizedNewCompany.isEmpty
+            && normalizedOldCompany != normalizedNewCompany
     }
 
     func addWorkExperience() {
@@ -150,26 +172,39 @@ final class AppStore: ObservableObject {
         save()
     }
 
-    func bindingForWorkExperience(id: UUID) -> Binding<WorkExperience>? {
-        Binding(
-            get: {
-                self.data.workExperiences.first { $0.id == id } ?? WorkExperience()
-            },
-            set: { newValue in
-                guard let index = self.data.workExperiences.firstIndex(where: { $0.id == id }) else { return }
-                var updated = newValue
-                updated.normalizeDateRange()
-                updated.normalizePlannerSubtasks()
-                updated.updatedAt = Date()
-                self.data.workExperiences[index] = updated
-                self.save()
-            }
-        )
+    func workExperience(id: UUID) -> WorkExperience? {
+        data.workExperiences.first { $0.id == id }
+    }
+
+    func saveWorkExperienceEdits(id: UUID, draft: WorkExperience) {
+        guard let index = data.workExperiences.firstIndex(where: { $0.id == id }) else { return }
+        let existing = data.workExperiences[index]
+        let updated = Self.updatedWorkExperience(existing: existing, draft: draft)
+        data.workExperiences[index] = updated
+        save()
+    }
+
+    nonisolated static func updatedWorkExperience(
+        existing: WorkExperience,
+        draft: WorkExperience,
+        now: Date = Date()
+    ) -> WorkExperience {
+        var updated = draft
+        updated.id = existing.id
+        updated.createdAt = existing.createdAt
+        updated.updatedAt = now
+        updated.normalizeDateRange()
+        updated.normalizePlannerSubtasks()
+        return updated
     }
 
     func filteredWorkExperiences(search: String) -> [WorkExperience] {
+        Self.filteredWorkExperiences(in: data.workExperiences, search: search)
+    }
+
+    nonisolated static func filteredWorkExperiences(in workExperiences: [WorkExperience], search: String) -> [WorkExperience] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        let sorted = data.workExperiences.sorted { lhs, rhs in
+        let sorted = workExperiences.sorted { lhs, rhs in
             if lhs.sortDate == rhs.sortDate {
                 if lhs.usesDateLogic && rhs.usesDateLogic, lhs.startDate != rhs.startDate {
                     return lhs.startDate > rhs.startDate
@@ -180,7 +215,7 @@ final class AppStore: ObservableObject {
         }
 
         guard !query.isEmpty else { return sorted }
-        return sorted.filter { $0.searchText.localizedCaseInsensitiveContains(query) }
+        return sorted.filter { $0.tableSearchText.localizedCaseInsensitiveContains(query) }
     }
 
     func cachedDashboardInsight(for taskSnapshotHash: String) -> DashboardInsightCache? {
@@ -217,6 +252,88 @@ final class AppStore: ObservableObject {
         save()
     }
 
+    func importInterviewsFromAppleCalendar() {
+        guard !isImportingCalendarInterviews else { return }
+        isImportingCalendarInterviews = true
+        calendarInterviewImportMessage = "Reading interview events from Apple Calendar..."
+        statusMessage = calendarInterviewImportMessage
+
+        calendarInterviewService.fetchInterviewEvents { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isImportingCalendarInterviews = false
+
+                switch result {
+                case .failure(let error):
+                    let message = "Calendar import failed: \(error.localizedDescription)"
+                    self.calendarInterviewImportMessage = message
+                    self.statusMessage = message
+                case .success(let events):
+                    self.finishCalendarInterviewImport(events)
+                }
+            }
+        }
+    }
+
+    private func finishCalendarInterviewImport(_ events: [CalendarInterviewEvent]) {
+        guard !events.isEmpty else {
+            let message = "No interview events were found in Apple Calendars between 2000 and 2100."
+            calendarInterviewImportMessage = message
+            statusMessage = message
+            return
+        }
+
+        let result = CalendarInterviewImporter.merge(
+            events: events,
+            into: data.interviewOpportunities
+        )
+        let changedRoundCount = result.importedRoundCount + result.updatedRoundCount
+
+        guard changedRoundCount > 0 else {
+            let message = "Found \(result.matchedEventCount) Calendar interview event\(result.matchedEventCount == 1 ? "" : "s"); all are already imported."
+            calendarInterviewImportMessage = message
+            statusMessage = message
+            return
+        }
+
+        do {
+            let backup = try backupService.createBackup(
+                data: data,
+                documentsDirectory: documentService.documentsDirectory
+            )
+            data.lastBackupDate = backup.date
+            data.lastBackupPath = backup.backupURLs.map(\.path).joined(separator: "\n")
+        } catch {
+            let message = "Calendar import stopped because the safety backup failed: \(error.localizedDescription)"
+            calendarInterviewImportMessage = message
+            statusMessage = message
+            return
+        }
+
+        data.interviewOpportunities = result.opportunities
+        selectedOpportunityID = result.importedOpportunityIDs.first
+        selectedSection = .interviewTracker
+        interviewFilter = .all
+        save()
+
+        var summaryParts: [String] = []
+        if result.importedRoundCount > 0 {
+            summaryParts.append("imported \(result.importedRoundCount) round\(result.importedRoundCount == 1 ? "" : "s")")
+        }
+        if result.updatedRoundCount > 0 {
+            summaryParts.append("updated \(result.updatedRoundCount) round\(result.updatedRoundCount == 1 ? "" : "s")")
+        }
+        if result.unchangedRoundCount > 0 {
+            summaryParts.append("left \(result.unchangedRoundCount) unchanged")
+        }
+        if result.createdOpportunityCount > 0 {
+            summaryParts.append("created \(result.createdOpportunityCount) opportunit\(result.createdOpportunityCount == 1 ? "y" : "ies")")
+        }
+        let message = "Apple Calendar import complete: \(summaryParts.joined(separator: ", "))."
+        calendarInterviewImportMessage = message
+        statusMessage = message
+    }
+
     func deleteSelectedInterviewOpportunity() {
         guard let selectedOpportunityID else { return }
         data.interviewOpportunities.removeAll { $0.id == selectedOpportunityID }
@@ -224,29 +341,152 @@ final class AppStore: ObservableObject {
         save()
     }
 
-    func bindingForOpportunity(id: UUID) -> Binding<InterviewOpportunity>? {
-        Binding(
-            get: {
-                self.data.interviewOpportunities.first { $0.id == id } ?? InterviewOpportunity()
-            },
-            set: { newValue in
-                guard let index = self.data.interviewOpportunities.firstIndex(where: { $0.id == id }) else { return }
-                var updated = newValue
-                updated.updatedAt = Date()
-                updated.normalizeDerivedFields()
-                self.data.interviewOpportunities[index] = updated
-                self.save()
+    func opportunity(id: UUID) -> InterviewOpportunity? {
+        data.interviewOpportunities.first { $0.id == id }
+    }
+
+    func saveInterviewEdits(id: UUID, draft: InterviewOpportunity) throws {
+        guard let index = data.interviewOpportunities.firstIndex(where: { $0.id == id }) else { return }
+
+        do {
+            let existing = data.interviewOpportunities[index]
+            let updated = try Self.updatedInterviewOpportunity(existing: existing, draft: draft)
+            data.interviewOpportunities[index] = updated
+            save()
+        } catch {
+            statusMessage = "Interview save failed: \(error.localizedDescription)"
+            throw error
+        }
+    }
+
+    nonisolated static func updatedInterviewOpportunity(
+        existing: InterviewOpportunity,
+        draft: InterviewOpportunity,
+        now: Date = Date()
+    ) throws -> InterviewOpportunity {
+        var updated = draft
+        updated.id = existing.id
+        updated.createdAt = existing.createdAt
+        updated.updatedAt = now
+        updated.normalizeDerivedFields(now: now)
+
+        try validateInterviewRounds(updated.interviewRounds, now: now)
+        reconcileFollowUp(on: &updated, existing: existing)
+        ensureUpcomingRoundFollowUp(on: &updated, now: now)
+
+        return updated
+    }
+
+    nonisolated private static func validateInterviewRounds(_ rounds: [InterviewRound], now: Date) throws {
+        for round in rounds {
+            let roundLabel = round.roundName.isBlank ? "This round" : round.roundName
+            let normalizedStatus = round.normalizedStatusValue(now: now)
+
+            guard !normalizedStatus.isBlank else {
+                throw InterviewOpportunitySaveError.roundValidation(
+                    "\(roundLabel) needs a round status before it can be saved."
+                )
             }
-        )
+
+            guard let status = round.statusOption(now: now) else {
+                throw InterviewOpportunitySaveError.roundValidation(
+                    "\(roundLabel) has an unsupported status. Choose one of the available round statuses."
+                )
+            }
+
+            if status == .upcoming, round.isScheduledInPast(relativeTo: now) {
+                let scheduleLabel = round.usesTime ? "date and time" : "date"
+                throw InterviewOpportunitySaveError.roundValidation(
+                    "\(roundLabel) is marked Upcoming, so its \(scheduleLabel) must be in the future."
+                )
+            }
+
+            if status != .upcoming, round.isScheduledInFuture(relativeTo: now) {
+                throw InterviewOpportunitySaveError.roundValidation(
+                    "\(roundLabel) is scheduled in the future, so its status must be Upcoming."
+                )
+            }
+        }
+    }
+
+    nonisolated private static func reconcileFollowUp(
+        on opportunity: inout InterviewOpportunity,
+        existing: InterviewOpportunity
+    ) {
+        guard opportunity.hasFollowUpRecord else {
+            opportunity.nextActionLinkedRoundID = nil
+            opportunity.nextActionWasAutoGenerated = false
+            return
+        }
+
+        if existing.nextActionWasAutoGenerated, followUpWasManuallyChanged(existing: existing, updated: opportunity) {
+            opportunity.nextActionLinkedRoundID = nil
+            opportunity.nextActionWasAutoGenerated = false
+        }
+
+        if opportunity.nextActionWasAutoGenerated,
+           let linkedRoundID = opportunity.nextActionLinkedRoundID,
+           !opportunity.interviewRounds.contains(where: { $0.id == linkedRoundID }) {
+            opportunity.nextActionLinkedRoundID = nil
+        }
+    }
+
+    nonisolated private static func followUpWasManuallyChanged(
+        existing: InterviewOpportunity,
+        updated: InterviewOpportunity
+    ) -> Bool {
+        existing.nextAction != updated.nextAction
+            || existing.nextActionDueDate != updated.nextActionDueDate
+    }
+
+    nonisolated private static func ensureUpcomingRoundFollowUp(on opportunity: inout InterviewOpportunity, now: Date) {
+        guard let upcomingRound = opportunity.nextUpcomingRound(relativeTo: now) else {
+            return
+        }
+
+        if opportunity.nextActionWasAutoGenerated,
+           opportunity.nextActionLinkedRoundID == upcomingRound.id,
+           opportunity.hasFollowUpRecord {
+            applyAutoGeneratedFollowUp(on: &opportunity, for: upcomingRound)
+            return
+        }
+
+        if opportunity.hasCurrentFollowUp(relativeTo: now) {
+            return
+        }
+
+        applyAutoGeneratedFollowUp(on: &opportunity, for: upcomingRound)
+    }
+
+    nonisolated private static func applyAutoGeneratedFollowUp(
+        on opportunity: inout InterviewOpportunity,
+        for upcomingRound: InterviewRound
+    ) {
+        let roundLabel = upcomingRound.roundName.isBlank ? "interview" : upcomingRound.roundName
+        opportunity.nextAction = "Prepare for \(roundLabel)"
+        opportunity.nextActionDueDate = upcomingRound.date
+        opportunity.nextActionLinkedRoundID = upcomingRound.id
+        opportunity.nextActionWasAutoGenerated = true
     }
 
     func filteredOpportunities(search: String, filter: InterviewFilter? = nil) -> [InterviewOpportunity] {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        let latestOpportunityIDsByCompany = latestOpportunityIDsByCompany()
-        let activeFilter = filter ?? interviewFilter
+        Self.filteredOpportunities(
+            in: data.interviewOpportunities,
+            search: search,
+            filter: filter ?? interviewFilter
+        )
+    }
 
-        let filteredByView = data.interviewOpportunities.filter { opportunity in
-            switch activeFilter {
+    nonisolated static func filteredOpportunities(
+        in opportunities: [InterviewOpportunity],
+        search: String,
+        filter: InterviewFilter
+    ) -> [InterviewOpportunity] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let latestOpportunityIDsByCompany = latestOpportunityIDsByCompany(in: opportunities)
+
+        let filteredByView = opportunities.filter { opportunity in
+            switch filter {
             case .all:
                 true
             case .active:
@@ -260,54 +500,24 @@ final class AppStore: ObservableObject {
 
         let filteredBySearch = query.isEmpty
             ? filteredByView
-            : filteredByView.filter { $0.searchText.localizedCaseInsensitiveContains(query) }
+            : filteredByView.filter { $0.tableSearchText.localizedCaseInsensitiveContains(query) }
 
         return filteredBySearch.sorted { lhs, rhs in
-            switch activeFilter {
-            case .all, .active:
-                return Self.sortByActionThenActivity(lhs, rhs)
-            case .eligibleAgain:
-                return Self.sortByEligibilityThenActivity(lhs, rhs)
-            case .closed:
-                return Self.sortByActivity(lhs, rhs)
-            }
+            Self.sortByStartDateDescending(lhs, rhs)
         }
     }
 
-    private static func sortByActionThenActivity(_ lhs: InterviewOpportunity, _ rhs: InterviewOpportunity) -> Bool {
-        switch (lhs.nextActionDueDate, rhs.nextActionDueDate) {
-        case let (left?, right?) where left != right:
-            return left < right
-        case (.some, .none):
-            return true
-        case (.none, .some):
-            return false
-        default:
-            return sortByActivity(lhs, rhs)
+    nonisolated private static func sortByStartDateDescending(_ lhs: InterviewOpportunity, _ rhs: InterviewOpportunity) -> Bool {
+        if lhs.appliedDate != rhs.appliedDate {
+            return lhs.appliedDate > rhs.appliedDate
         }
-    }
-
-    private static func sortByEligibilityThenActivity(_ lhs: InterviewOpportunity, _ rhs: InterviewOpportunity) -> Bool {
-        switch (lhs.cooldownEligibleDate, rhs.cooldownEligibleDate) {
-        case let (left?, right?) where left != right:
-            return left < right
-        case (.some, .none):
-            return true
-        case (.none, .some):
-            return false
-        default:
-            return sortByActivity(lhs, rhs)
-        }
-    }
-
-    private static func sortByActivity(_ lhs: InterviewOpportunity, _ rhs: InterviewOpportunity) -> Bool {
         if lhs.calculatedLastActivityDate != rhs.calculatedLastActivityDate {
             return lhs.calculatedLastActivityDate > rhs.calculatedLastActivityDate
         }
         return lhs.updatedAt > rhs.updatedAt
     }
 
-    private func isEligibleAgainLatestOpportunity(
+    nonisolated private static func isEligibleAgainLatestOpportunity(
         _ opportunity: InterviewOpportunity,
         latestOpportunityIDsByCompany: [String: UUID]
     ) -> Bool {
@@ -320,10 +530,10 @@ final class AppStore: ObservableObject {
         return latestOpportunityIDsByCompany[companyKey] == opportunity.id
     }
 
-    private func latestOpportunityIDsByCompany() -> [String: UUID] {
+    nonisolated static func latestOpportunityIDsByCompany(in opportunities: [InterviewOpportunity]) -> [String: UUID] {
         var latestByCompany: [String: InterviewOpportunity] = [:]
 
-        for opportunity in data.interviewOpportunities {
+        for opportunity in opportunities {
             let companyKey = Self.normalizedCompanyKey(opportunity.company)
             guard !companyKey.isEmpty else { continue }
 
@@ -340,26 +550,26 @@ final class AppStore: ObservableObject {
         return latestByCompany.mapValues(\.id)
     }
 
-    private static func normalizedCompanyKey(_ company: String) -> String {
+    nonisolated private static func normalizedCompanyKey(_ company: String) -> String {
         company.collapsedWhitespace.lowercased()
     }
 
-    private static func normalizedDropdownOptionKey(_ value: String) -> String {
+    nonisolated private static func normalizedDropdownOptionKey(_ value: String) -> String {
         value.collapsedWhitespace.lowercased()
     }
 
-    private static func normalizedDropdownOptionDisplay(_ value: String) -> String {
+    nonisolated private static func normalizedDropdownOptionDisplay(_ value: String) -> String {
         value.collapsedWhitespace
     }
 
-    private static func preferredDropdownOptionDisplay(existing: String, candidate: String) -> String {
+    nonisolated private static func preferredDropdownOptionDisplay(existing: String, candidate: String) -> String {
         if existing == existing.lowercased(), candidate != candidate.lowercased() {
             return candidate
         }
         return existing
     }
 
-    private static func isMoreRecentOpportunity(_ lhs: InterviewOpportunity, than rhs: InterviewOpportunity) -> Bool {
+    nonisolated private static func isMoreRecentOpportunity(_ lhs: InterviewOpportunity, than rhs: InterviewOpportunity) -> Bool {
         if lhs.calculatedLastActivityDate != rhs.calculatedLastActivityDate {
             return lhs.calculatedLastActivityDate > rhs.calculatedLastActivityDate
         }
@@ -444,9 +654,95 @@ final class AppStore: ObservableObject {
         }
     }
 
+    func saveDocumentEdits(id: UUID, draft: DocumentRecord, desiredFileName: String) throws {
+        guard let index = data.documents.firstIndex(where: { $0.id == id }) else { return }
+
+        let existing = data.documents[index]
+        let existingCompany = existing.company.collapsedWhitespace
+        let trimmedCompany = draft.company.collapsedWhitespace
+        let requestedFileName = desiredFileName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        do {
+            let timestamp = Date()
+
+            if Self.shouldRenameDocumentCompanyDirectory(from: existingCompany, to: trimmedCompany) {
+                let affectedIndices = data.documents.indices.filter {
+                    data.documents[$0].company.collapsedWhitespace.localizedCaseInsensitiveCompare(existingCompany) == .orderedSame
+                }
+
+                let movedDocuments = try documentService.updateDocumentsForCompanyRename(
+                    affectedIndices.map { data.documents[$0] },
+                    from: existingCompany,
+                    to: trimmedCompany,
+                    selectedDocumentID: existing.id,
+                    selectedDesiredFileName: requestedFileName
+                )
+                let movedByID = Dictionary(uniqueKeysWithValues: movedDocuments.map { ($0.id, $0) })
+
+                for affectedIndex in affectedIndices {
+                    let original = data.documents[affectedIndex]
+                    guard var moved = movedByID[original.id] else { continue }
+
+                    if original.id == existing.id {
+                        let userVersion = draft.version
+                        moved.kind = draft.kind
+                        moved.version = userVersion
+                        moved.notes = draft.notes
+                        moved.originalFileName = existing.originalFileName
+                        moved.createdAt = existing.createdAt
+                        moved.updatedAt = timestamp
+                        documentService.persistVersionMetadata(userVersion, for: moved)
+                        moved = documentService.refreshMetadata(for: moved, loadVersionMetadata: !userVersion.isBlank)
+                        moved.version = userVersion
+                    } else {
+                        moved.updatedAt = timestamp
+                    }
+
+                    data.documents[affectedIndex] = moved
+                }
+
+                save()
+                return
+            }
+
+            let stored = try documentService.updateDocument(
+                existing,
+                desiredFileName: requestedFileName,
+                company: trimmedCompany
+            )
+
+            var updated = draft
+            let userVersion = updated.version
+            updated.id = existing.id
+            updated.company = trimmedCompany
+            updated.name = stored.name
+            updated.originalFileName = existing.originalFileName
+            updated.storedFileName = stored.storedFileName
+            updated.fileSizeBytes = stored.fileSizeBytes
+            updated.fileCreatedAt = stored.fileCreatedAt
+            updated.fileModifiedAt = stored.fileModifiedAt
+            updated.createdAt = existing.createdAt
+            updated.updatedAt = timestamp
+
+            documentService.persistVersionMetadata(userVersion, for: updated)
+            updated = documentService.refreshMetadata(for: updated, loadVersionMetadata: !userVersion.isBlank)
+            updated.version = userVersion
+
+            data.documents[index] = updated
+            save()
+        } catch {
+            statusMessage = "Document save failed: \(error.localizedDescription)"
+            throw error
+        }
+    }
+
     func filteredDocuments(search: String) -> [DocumentRecord] {
+        Self.filteredDocuments(in: data.documents, search: search)
+    }
+
+    nonisolated static func filteredDocuments(in documents: [DocumentRecord], search: String) -> [DocumentRecord] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        let sorted = data.documents.sorted { lhs, rhs in
+        let sorted = documents.sorted { lhs, rhs in
             let leftCompany = lhs.company.trimmingCharacters(in: .whitespacesAndNewlines)
             let rightCompany = rhs.company.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -484,7 +780,7 @@ final class AppStore: ObservableObject {
         }
 
         guard !query.isEmpty else { return sorted }
-        return sorted.filter { $0.searchText.localizedCaseInsensitiveContains(query) }
+        return sorted.filter { $0.tableSearchText.localizedCaseInsensitiveContains(query) }
     }
 
     func openDocument(_ document: DocumentRecord) {
@@ -616,7 +912,7 @@ final class AppStore: ObservableObject {
         }
     }
 
-    static func shouldSeedDemoDataOnLaunch(dataFileExists: Bool, data: AppData, allowsDemoData: Bool) -> Bool {
+    nonisolated static func shouldSeedDemoDataOnLaunch(dataFileExists: Bool, data: AppData, allowsDemoData: Bool) -> Bool {
         guard allowsDemoData else { return false }
         guard !dataFileExists else { return false }
         return data.workExperiences.isEmpty

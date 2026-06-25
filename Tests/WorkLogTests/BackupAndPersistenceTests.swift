@@ -62,8 +62,9 @@ final class BackupAndPersistenceTests: XCTestCase {
         XCTAssertTrue(fileManager.fileExists(atPath: newBackup.appendingPathComponent("work-log-data.json").path))
         XCTAssertTrue(fileManager.fileExists(atPath: legacyBackup.appendingPathComponent("Documents/resume.txt").path))
         XCTAssertTrue(fileManager.fileExists(atPath: newBackup.appendingPathComponent("Documents/resume.txt").path))
-        XCTAssertTrue(result.backupURLs.contains(where: { $0.path == legacyBackup.path }))
-        XCTAssertTrue(result.backupURLs.contains(where: { $0.path == newBackup.path }))
+        let returnedPaths = Set(result.backupURLs.map(canonicalPath))
+        XCTAssertTrue(returnedPaths.contains(canonicalPath(legacyBackup)))
+        XCTAssertTrue(returnedPaths.contains(canonicalPath(newBackup)))
     }
 
     func testCreateBackupCleansUpOlderBackupsInBothCloudPaths() throws {
@@ -327,5 +328,9 @@ final class BackupAndPersistenceTests: XCTestCase {
         }
         XCTAssertEqual(folders.count, 1)
         return folders[0]
+    }
+
+    private func canonicalPath(_ url: URL) -> String {
+        url.resolvingSymlinksInPath().standardizedFileURL.path
     }
 }

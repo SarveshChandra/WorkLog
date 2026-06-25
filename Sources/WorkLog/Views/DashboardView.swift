@@ -11,16 +11,25 @@ struct DashboardView: View {
         TaskInsights(entries: store.data.workExperiences)
     }
 
-    private var taskSnapshotHash: String {
-        TaskSnapshotHasher.hash(for: store.data.workExperiences)
+    private var highlights: DashboardHighlights {
+        DashboardHighlights(
+            workExperiences: store.data.workExperiences,
+            interviewOpportunities: store.data.interviewOpportunities
+        )
+    }
+
+    private var dashboardInsightTrigger: String {
+        let entries = store.data.workExperiences
+        let latestUpdate = entries.map(\.updatedAt.timeIntervalSince1970).max() ?? 0
+        return "\(entries.count)|\(latestUpdate)"
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            if store.data.workExperiences.isEmpty {
+            if store.data.workExperiences.isEmpty && store.data.interviewOpportunities.isEmpty {
                 EmptyDetailView(
-                    title: "No task data yet",
-                    message: "Add Tasks first. Dashboard insights appear here after task data exists.",
+                    title: "No dashboard data yet",
+                    message: "Add Tasks or Interview Tracker entries first. Dashboard summaries appear here after data exists.",
                     systemImage: "chart.bar.doc.horizontal"
                 )
             } else {
@@ -32,7 +41,7 @@ struct DashboardView: View {
                             .padding(.bottom, 28)
                     }
                 }
-                .task(id: taskSnapshotHash) {
+                .task(id: dashboardInsightTrigger) {
                     await updateAppleIntelligenceInsights()
                 }
             }
@@ -44,7 +53,69 @@ struct DashboardView: View {
 
     private var dashboardContent: some View {
         VStack(alignment: .leading, spacing: 24) {
-            unifiedInsights
+            dashboardSummarySections
+
+            if !store.data.workExperiences.isEmpty {
+                unifiedInsights
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var dashboardSummarySections: some View {
+        LazyVGrid(
+            columns: [
+                GridItem(.flexible(minimum: 300), spacing: 18, alignment: .top),
+                GridItem(.flexible(minimum: 300), spacing: 18, alignment: .top),
+                GridItem(.flexible(minimum: 300), spacing: 18, alignment: .top)
+            ],
+            alignment: .leading,
+            spacing: 18
+        ) {
+            DashboardCard(
+                title: "Incomplete Tasks",
+                systemImage: "checklist"
+            ) {
+                if highlights.incompleteTasks.isEmpty {
+                    DashboardEmptyState(text: "No incomplete tasks right now.")
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(highlights.incompleteTasks) { item in
+                            DashboardTaskRow(item: item)
+                        }
+                    }
+                }
+            }
+
+            DashboardCard(
+                title: "Upcoming Rounds",
+                systemImage: "calendar.badge.clock"
+            ) {
+                if highlights.upcomingRounds.isEmpty {
+                    DashboardEmptyState(text: "No upcoming rounds scheduled.")
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(highlights.upcomingRounds) { item in
+                            DashboardRoundRow(item: item)
+                        }
+                    }
+                }
+            }
+
+            DashboardCard(
+                title: "Follow-up Actions",
+                systemImage: "bell.badge"
+            ) {
+                if highlights.followUpActions.isEmpty {
+                    DashboardEmptyState(text: "No active follow-up actions.")
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(highlights.followUpActions) { item in
+                            DashboardFollowUpRow(item: item)
+                        }
+                    }
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -59,7 +130,7 @@ struct DashboardView: View {
                         ProgressView()
                             .controlSize(.small)
                     }
-                Text(statusMessage)
+                    Text(statusMessage)
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -136,8 +207,10 @@ struct DashboardView: View {
     @MainActor
     private func updateAppleIntelligenceInsights() async {
         let entries = store.data.workExperiences
-        let snapshotHash = TaskSnapshotHasher.hash(for: entries)
         let previousCache = store.data.dashboardInsightCache
+        let snapshotHash = await Task.detached(priority: .utility) {
+            TaskSnapshotHasher.hash(for: entries)
+        }.value
 
         if let cache = store.cachedDashboardInsight(for: snapshotHash) {
             appleIntelligenceState = .generated(cache.insightText, generatedAt: cache.generatedAt, isCached: true)
@@ -355,6 +428,8 @@ private enum TaskSnapshotHasher {
 #if canImport(FoundationModels)
 @available(macOS 26.0, *)
 private enum FoundationModelsTaskAnalyzer {
+    private static let taskSnapshotCharacterBudget = 5_000
+
     static func analyze(entries: [WorkExperience]) async -> AppleIntelligenceInsightState {
         let model = SystemLanguageModel.default
 
@@ -375,16 +450,15 @@ private enum FoundationModelsTaskAnalyzer {
     }
 
     private static let instructions = """
-    You analyze a private work-log dashboard inside a macOS app. You have read-only access to task snapshots.
-    Analyze all tasks and every compacted field for each task.
-    Do not claim to edit, update, apply, save, or rewrite any task data.
-    Do not ask the user to use cloud AI or external services.
+    You analyze a private work-log dashboard inside a macOS app.
+    You only have read-only access to synthesized task data.
     Be specific, practical, and useful for career growth.
+    Do not claim to edit, update, save, or rewrite any task data.
     """
 
     private static func prompt(for entries: [WorkExperience]) -> String {
         """
-        Analyze every compacted field for every Task below. Return plain text only.
+        Analyze the dashboard data below. Return plain text only.
         Do not use Markdown, # headings, ** bold markers, tables, or code blocks.
 
         Required format, with each section label on its own line and exactly 4 concrete bullet lines per section:
@@ -411,56 +485,185 @@ private enum FoundationModelsTaskAnalyzer {
 
         Rules:
         - Read-only analysis only.
-        - Use all Tasks and all compacted fields, not just tags.
-        - Mention actual task names, products, tags, skills, challenges, outcomes, or learnings.
+        - Use the portfolio summary plus task lines together.
+        - Mention actual task names, tags, skills, challenges, outcomes, or learnings when useful.
         - Do not write generic praise about the company, engineers, or industry.
         - Do not output single words, role names, company names, or field values as standalone insights.
-        - Every bullet must be a useful sentence with at least 8 words.
+        - Every bullet must be a useful sentence with 8 to 18 words.
         - Do not invent data.
-        - Keep the full answer under 360 words.
+        - Keep the full answer under 320 words.
 
-        Compacted task snapshot:
-        \(taskSnapshot(from: entries))
+        Portfolio summary:
+        \(portfolioSummary(from: entries))
+
+        Task lines:
+        \(taskSnapshot(from: entries, characterBudget: taskSnapshotCharacterBudget))
         """
     }
 
-    private static func taskSnapshot(from entries: [WorkExperience]) -> String {
-        entries
-            .sorted { lhs, rhs in
-                if lhs.sortDate == rhs.sortDate {
-                    if lhs.usesDateLogic && rhs.usesDateLogic, lhs.startDate != rhs.startDate {
-                        return lhs.startDate > rhs.startDate
-                    }
-                    return lhs.updatedAt > rhs.updatedAt
+    private static func portfolioSummary(from entries: [WorkExperience]) -> String {
+        let insights = TaskInsights(entries: entries)
+        let sorted = sortedEntries(entries)
+        let datedCount = entries.filter(\.usesDateLogic).count
+        let missingOutcomeCount = entries.filter { $0.outcome.isBlank }.count
+        let missingLearningCount = entries.filter { $0.learning.isBlank }.count
+        let missingSkillsCount = entries.filter { $0.skillsUsed.isBlank }.count
+        let missingChallengeCount = entries.filter { $0.challenges.isBlank }.count
+        let recentTaskTitles = sorted
+            .prefix(4)
+            .map { compact(displayValue($0.task, empty: "Untitled task"), limit: 34) }
+            .joined(separator: "; ")
+        let achievementSignals = insights.achievementSignals
+            .prefix(3)
+            .map { compact($0, limit: 90) }
+            .joined(separator: " || ")
+
+        return [
+            "Totals: tasks=\(entries.count), recent30d=\(recentEntriesCount(in: entries)), dated=\(datedCount), undated=\(entries.count - datedCount), completeNarratives=\(insights.completeTaskCount).",
+            "Coverage gaps: outcome=\(missingOutcomeCount), learning=\(missingLearningCount), skills=\(missingSkillsCount), challenge=\(missingChallengeCount).",
+            "Top skills: \(topTerms(from: entries.flatMap { WorkExperienceSkillOptions.skills(in: $0.skillsUsed) }, limit: 5)).",
+            "Top tags: \(topTerms(from: entries.flatMap { WorkExperienceTagOptions.tags(in: $0.tags) }, limit: 5)).",
+            "Achievement signals: \(achievementSignals.isEmpty ? "None yet." : "\(achievementSignals).")",
+            "Most recent tasks: \(recentTaskTitles.isEmpty ? "None yet." : "\(recentTaskTitles).")"
+        ].joined(separator: "\n")
+    }
+
+    private static func taskSnapshot(from entries: [WorkExperience], characterBudget: Int) -> String {
+        let sorted = sortedEntries(entries)
+        let detailedLines = sorted.enumerated().map { index, entry in
+            detailedTaskLine(index: index + 1, entry: entry)
+        }
+        let detailedSnapshot = detailedLines.joined(separator: "\n")
+        if detailedSnapshot.count <= characterBudget {
+            return detailedSnapshot
+        }
+
+        let compactLines = sorted.enumerated().map { index, entry in
+            compactTaskLine(index: index + 1, entry: entry)
+        }
+        let compactSnapshot = compactLines.joined(separator: "\n")
+        if compactSnapshot.count <= characterBudget {
+            return compactSnapshot
+        }
+
+        return rolledUpTaskSnapshot(from: sorted, characterBudget: characterBudget)
+    }
+
+    private static func rolledUpTaskSnapshot(from entries: [WorkExperience], characterBudget: Int) -> String {
+        var visibleLines: [String] = []
+
+        for (index, entry) in entries.enumerated() {
+            let candidateLines = visibleLines + [compactTaskLine(index: index + 1, entry: entry)]
+            let remainingEntries = Array(entries.dropFirst(candidateLines.count))
+            let candidateSnapshot = snapshotText(lines: candidateLines, rolledUpEntries: remainingEntries)
+
+            guard candidateSnapshot.count <= characterBudget else {
+                break
+            }
+
+            visibleLines = candidateLines
+        }
+
+        let rolledUpEntries = Array(entries.dropFirst(visibleLines.count))
+        return snapshotText(lines: visibleLines, rolledUpEntries: rolledUpEntries)
+    }
+
+    private static func snapshotText(lines: [String], rolledUpEntries: [WorkExperience]) -> String {
+        var parts = lines
+        if !rolledUpEntries.isEmpty {
+            parts.append(rolledUpTaskSummary(for: rolledUpEntries))
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    private static func rolledUpTaskSummary(for entries: [WorkExperience]) -> String {
+        let recentTitles = sortedEntries(entries)
+            .prefix(3)
+            .map { compact(displayValue($0.task, empty: "Untitled task"), limit: 28) }
+            .joined(separator: "; ")
+
+        return [
+            "RollupCount=\(entries.count)",
+            "RecentTitles=\(recentTitles.isEmpty ? "None" : recentTitles)",
+            "TopSkills=\(topTerms(from: entries.flatMap { WorkExperienceSkillOptions.skills(in: $0.skillsUsed) }, limit: 4))",
+            "TopTags=\(topTerms(from: entries.flatMap { WorkExperienceTagOptions.tags(in: $0.tags) }, limit: 4))",
+            "MissingOutcome=\(entries.filter { $0.outcome.isBlank }.count)",
+            "MissingLearning=\(entries.filter { $0.learning.isBlank }.count)"
+        ].joined(separator: " | ")
+    }
+
+    private static func detailedTaskLine(index: Int, entry: WorkExperience) -> String {
+        [
+            taskLabel(for: index),
+            "Co=\(compact(displayValue(entry.company), limit: 16))",
+            "Focus=\(compact(focus(for: entry), limit: 28))",
+            "Task=\(compact(displayValue(entry.task, empty: "Untitled task"), limit: 42))",
+            "Tags=\(compact(displayValue(entry.tags), limit: 26))",
+            "Skills=\(compact(displayValue(entry.skillsUsed), limit: 26))",
+            "Outcome=\(compact(displayValue(entry.outcome), limit: 34))",
+            "Challenge=\(compact(displayValue(entry.challenges), limit: 28))"
+        ].joined(separator: " | ")
+    }
+
+    private static func compactTaskLine(index: Int, entry: WorkExperience) -> String {
+        [
+            taskLabel(for: index),
+            "Task=\(compact(displayValue(entry.task, empty: "Untitled task"), limit: 34))",
+            "Tags=\(compact(displayValue(entry.tags), limit: 18))",
+            "Skills=\(compact(displayValue(entry.skillsUsed), limit: 18))",
+            "Outcome=\(compact(displayValue(entry.outcome), limit: 26))",
+            "Challenge=\(compact(displayValue(entry.challenges), limit: 22))"
+        ].joined(separator: " | ")
+    }
+
+    private static func sortedEntries(_ entries: [WorkExperience]) -> [WorkExperience] {
+        entries.sorted { lhs, rhs in
+            if lhs.sortDate == rhs.sortDate {
+                if lhs.usesDateLogic && rhs.usesDateLogic, lhs.startDate != rhs.startDate {
+                    return lhs.startDate > rhs.startDate
                 }
-                return lhs.sortDate > rhs.sortDate
+                return lhs.updatedAt > rhs.updatedAt
             }
-            .enumerated()
-            .map { index, entry in
-                [
-                    "\(index + 1)",
-                    "Company=\(compact(entry.company, limit: 45))",
-                    "Designation=\(compact(entry.designation, limit: 45))",
-                    "Role=\(compact(entry.role, limit: 45))",
-                    "Product=\(compact(entry.projectProduct, limit: 45))",
-                    "Team=\(compact(entry.team, limit: 45))",
-                    "Feature=\(compact(entry.feature, limit: 45))",
-                    "Task=\(compact(entry.task, limit: 70))",
-                    "Tags=\(compact(entry.tags, limit: 90))",
-                    "Dates=\(entry.dateSummaryText)",
-                    "PlanStatus=\(entry.plannerStatus.rawValue)",
-                    "PlanProgress=\(compact(entry.plannerProgressText, limit: 40))",
-                    "NextStep=\(compact(entry.plannerNextStepText ?? "None", limit: 70))",
-                    "Subtasks=\(compact(entry.plannerSnapshotText, limit: 140))",
-                    "Situation=\(compact(entry.situation, limit: 110))",
-                    "Challenges=\(compact(entry.challenges, limit: 110))",
-                    "Skills=\(compact(entry.skillsUsed, limit: 90))",
-                    "Action=\(compact(entry.action, limit: 110))",
-                    "Outcome=\(compact(entry.outcome, limit: 110))",
-                    "Learning=\(compact(entry.learning, limit: 90))"
-                ].joined(separator: " | ")
+            return lhs.sortDate > rhs.sortDate
+        }
+    }
+
+    private static func recentEntriesCount(in entries: [WorkExperience]) -> Int {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+        return entries.filter { $0.sortDate >= cutoff }.count
+    }
+
+    private static func topTerms(from values: [String], limit: Int) -> String {
+        let counts = values
+            .filter { !$0.isBlank }
+            .reduce(into: [String: Int]()) { result, value in
+                result[value, default: 0] += 1
             }
-            .joined(separator: "\n")
+            .sorted { lhs, rhs in
+                if lhs.value == rhs.value {
+                    return lhs.key.localizedCaseInsensitiveCompare(rhs.key) == .orderedAscending
+                }
+                return lhs.value > rhs.value
+            }
+            .prefix(limit)
+
+        guard !counts.isEmpty else { return "None" }
+        return counts.map { "\($0.key) (\($0.value))" }.joined(separator: ", ")
+    }
+
+    private static func taskLabel(for index: Int) -> String {
+        String(format: "T%02d", index)
+    }
+
+    private static func focus(for entry: WorkExperience) -> String {
+        let values = [entry.projectProduct, entry.feature]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return values.isEmpty ? "Unspecified" : values.joined(separator: " / ")
+    }
+
+    private static func displayValue(_ value: String, empty: String = "None") -> String {
+        value.isBlank ? empty : value
     }
 
     private static func compact(_ value: String, limit: Int) -> String {
@@ -835,10 +1038,443 @@ private struct TaskInsights {
     }
 }
 
+private struct DashboardHighlights {
+    var incompleteTasks: [DashboardTaskSummary]
+    var upcomingRounds: [DashboardRoundSummary]
+    var followUpActions: [DashboardFollowUpSummary]
+
+    init(
+        workExperiences: [WorkExperience],
+        interviewOpportunities: [InterviewOpportunity],
+        now: Date = Date()
+    ) {
+        incompleteTasks = Self.sortedWorkExperiences(workExperiences)
+            .filter { !$0.isCompleteForTaskList }
+            .map(DashboardTaskSummary.init)
+
+        upcomingRounds = interviewOpportunities
+            .flatMap { opportunity in
+                opportunity.interviewRounds.compactMap { round in
+                    let isSameDayUpcoming = round.statusOption(now: now) == .upcoming
+                        && Calendar.current.isDate(round.date, inSameDayAs: now)
+                    guard round.isScheduledInFuture(relativeTo: now) || isSameDayUpcoming else {
+                        return nil
+                    }
+                    return DashboardRoundSummary(opportunity: opportunity, round: round)
+                }
+            }
+            .sorted { lhs, rhs in
+                if lhs.scheduleDate != rhs.scheduleDate {
+                    return lhs.scheduleDate < rhs.scheduleDate
+                }
+                if lhs.company != rhs.company {
+                    return lhs.company.localizedCaseInsensitiveCompare(rhs.company) == .orderedAscending
+                }
+                if lhs.roundName != rhs.roundName {
+                    return lhs.roundName.localizedCaseInsensitiveCompare(rhs.roundName) == .orderedAscending
+                }
+                return lhs.id < rhs.id
+            }
+
+        followUpActions = interviewOpportunities
+            .compactMap { opportunity in
+                guard opportunity.hasCurrentFollowUp(relativeTo: now),
+                      let dueDate = opportunity.currentNextActionDueDate else {
+                    return nil
+                }
+                return DashboardFollowUpSummary(opportunity: opportunity, dueDate: dueDate)
+            }
+            .sorted { lhs, rhs in
+                if lhs.dueDate != rhs.dueDate {
+                    return lhs.dueDate < rhs.dueDate
+                }
+                if lhs.company != rhs.company {
+                    return lhs.company.localizedCaseInsensitiveCompare(rhs.company) == .orderedAscending
+                }
+                if lhs.action != rhs.action {
+                    return lhs.action.localizedCaseInsensitiveCompare(rhs.action) == .orderedAscending
+                }
+                return lhs.id < rhs.id
+            }
+    }
+
+    var isEmpty: Bool {
+        incompleteTasks.isEmpty && upcomingRounds.isEmpty && followUpActions.isEmpty
+    }
+
+    private static func sortedWorkExperiences(_ entries: [WorkExperience]) -> [WorkExperience] {
+        entries.sorted { lhs, rhs in
+            if lhs.sortDate == rhs.sortDate {
+                if lhs.usesDateLogic && rhs.usesDateLogic, lhs.startDate != rhs.startDate {
+                    return lhs.startDate > rhs.startDate
+                }
+                return lhs.updatedAt > rhs.updatedAt
+            }
+            return lhs.sortDate > rhs.sortDate
+        }
+    }
+}
+
+private struct DashboardTaskSummary: Identifiable {
+    let id: UUID
+    let title: String
+    let context: String
+    let status: WorkExperienceSubtaskStatus
+    let progressText: String
+    let pendingSubtasks: [DashboardPendingSubtask]
+
+    init(entry: WorkExperience) {
+        id = entry.id
+        title = entry.task.nonBlankValue
+        context = Self.contextSummary(for: entry)
+        status = entry.plannerStatus
+        progressText = entry.plannerProgressText
+        pendingSubtasks = entry.orderedSubtasks
+            .filter { !$0.status.isDone }
+            .map { DashboardPendingSubtask(subtask: $0, usesDateLogic: entry.usesDateLogic) }
+    }
+
+    private static func contextSummary(for entry: WorkExperience) -> String {
+        let values = [entry.company, entry.projectProduct, entry.feature]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return values.isEmpty ? "Company not set" : values.joined(separator: " • ")
+    }
+}
+
+private struct DashboardPendingSubtask: Identifiable {
+    let id: UUID
+    let title: String
+    let status: WorkExperienceSubtaskStatus
+    let dueText: String?
+
+    init(subtask: WorkExperienceSubtask, usesDateLogic: Bool) {
+        id = subtask.id
+        title = subtask.displayTitle
+        status = subtask.status
+        dueText = usesDateLogic ? AppDateFormatters.short(subtask.dueDate) : nil
+    }
+}
+
+private struct DashboardRoundSummary: Identifiable {
+    let id: String
+    let company: String
+    let role: String
+    let roundName: String
+    let interviewer: String
+    let scheduleText: String
+    let scheduleDate: Date
+    let usesTime: Bool
+    let badgeText: String
+    let badgeTint: Color
+
+    init(opportunity: InterviewOpportunity, round: InterviewRound) {
+        id = "\(opportunity.id.uuidString)-\(round.id.uuidString)"
+        company = opportunity.company.isBlank ? "Untitled company" : opportunity.company
+        role = opportunity.role.isBlank ? "Role not set" : opportunity.role
+        roundName = round.roundName.isBlank ? "Round" : round.roundName
+        interviewer = round.interviewer.isBlank ? "Not set" : round.interviewer
+        scheduleDate = round.date
+        usesTime = round.usesTime
+        scheduleText = round.usesTime
+            ? AppDateFormatters.calendarDateTime.string(from: round.date)
+            : AppDateFormatters.short(round.date)
+        badgeText = "Upcoming"
+        badgeTint = .workLogIconGreen
+    }
+}
+
+private struct DashboardFollowUpSummary: Identifiable {
+    let id: String
+    let company: String
+    let role: String
+    let action: String
+    let dueDate: Date
+    let dueText: String
+    let linkedRoundName: String
+    let badgeText: String
+    let badgeTint: Color
+
+    init(opportunity: InterviewOpportunity, dueDate: Date) {
+        id = opportunity.id.uuidString
+        company = opportunity.company.isBlank ? "Untitled company" : opportunity.company
+        role = opportunity.role.isBlank ? "Role not set" : opportunity.role
+        action = opportunity.currentNextAction.isBlank ? "Not set" : opportunity.currentNextAction
+        self.dueDate = dueDate
+        dueText = AppDateFormatters.calendarDateTime.string(from: dueDate)
+        if let linkedRoundID = opportunity.nextActionLinkedRoundID,
+           let roundName = opportunity.interviewRounds.first(where: { $0.id == linkedRoundID })?.roundName,
+           !roundName.isBlank {
+            linkedRoundName = roundName
+        } else {
+            linkedRoundName = ""
+        }
+        badgeText = "Follow-up"
+        badgeTint = .workLogDoingYellow
+    }
+}
+
+private struct DashboardCard<Content: View>: View {
+    var title: String
+    var systemImage: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 7) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+                Text(title)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.workLogHeaderText)
+            }
+
+            ScrollView {
+                content
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .scrollIndicators(.automatic)
+        }
+        .frame(height: 320, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .padding(16)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 9))
+        .overlay {
+            RoundedRectangle(cornerRadius: 9)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.03), radius: 6, y: 1)
+    }
+}
+
+private struct DashboardEmptyState: View {
+    var text: String
+
+    var body: some View {
+        Text(text)
+            .font(.callout)
+            .foregroundStyle(text.workLogDisplayColor(isSecondary: true))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private struct DashboardTaskRow: View {
+    var item: DashboardTaskSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.title)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.workLogHeaderText)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(item.context)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                DashboardBadge(text: item.status.rawValue, tint: item.status.dashboardTint)
+            }
+
+            Text(item.progressText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if item.pendingSubtasks.isEmpty {
+                DashboardEmptyState(text: "No pending subtasks.")
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(item.pendingSubtasks) { subtask in
+                        DashboardPendingSubtaskRow(subtask: subtask)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
+        }
+    }
+}
+
+private struct DashboardPendingSubtaskRow: View {
+    var subtask: DashboardPendingSubtask
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: subtask.status.dashboardSystemImage)
+                .foregroundStyle(subtask.status.dashboardTint)
+                .frame(width: 16)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(subtask.title)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let dueText = subtask.dueText {
+                    Text("Due \(dueText)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
+private struct DashboardRoundRow: View {
+    var item: DashboardRoundSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.company)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.workLogHeaderText)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(item.role)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                DashboardBadge(text: item.badgeText, tint: item.badgeTint)
+            }
+
+            Text(item.roundName)
+                .font(.callout)
+                .foregroundStyle(.primary)
+
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Label(item.scheduleText, systemImage: item.usesTime ? "calendar.badge.clock" : "calendar")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 12)
+
+                Text(item.interviewer)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
+        }
+    }
+}
+
+private struct DashboardFollowUpRow: View {
+    var item: DashboardFollowUpSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.company)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.workLogHeaderText)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(item.role)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                DashboardBadge(text: item.badgeText, tint: item.badgeTint)
+            }
+
+            Text(item.action)
+                .font(.callout)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Label(item.dueText, systemImage: "calendar.badge.clock")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 12)
+
+                if !item.linkedRoundName.isBlank {
+                    Text(item.linkedRoundName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
+        }
+    }
+}
+
+private struct DashboardBadge: View {
+    var text: String
+    var tint: Color
+
+    var body: some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+    }
+}
+
 private struct AchievementCandidate {
     let entry: WorkExperience
     let score: Int
     let reasons: [String]
+}
+
+private extension WorkExperienceSubtaskStatus {
+    var dashboardSystemImage: String {
+        switch self {
+        case .todo:
+            return "circle"
+        case .doing:
+            return "play.circle.fill"
+        case .blocked:
+            return "exclamationmark.triangle.fill"
+        case .done:
+            return "checkmark.circle.fill"
+        }
+    }
+
+    var dashboardTint: Color {
+        switch self {
+        case .todo:
+            return .secondary
+        case .doing:
+            return .workLogDoingYellow
+        case .blocked:
+            return .orange
+        case .done:
+            return .workLogIconGreen
+        }
+    }
 }
 
 private extension String {

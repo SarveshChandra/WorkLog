@@ -5,6 +5,7 @@ import SwiftUI
 struct WorkLogApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var store = AppStore()
+    @State private var didHandleLaunchArguments = false
 
     var body: some Scene {
         WindowGroup("Work Log") {
@@ -12,6 +13,13 @@ struct WorkLogApp: App {
                 .font(.custom("Helvetica Neue", size: 14))
                 .environmentObject(store)
                 .frame(minWidth: 1180, minHeight: 720)
+                .onAppear {
+                    guard !didHandleLaunchArguments else { return }
+                    didHandleLaunchArguments = true
+                    if ProcessInfo.processInfo.arguments.contains("--import-interviews-from-calendar") {
+                        store.importInterviewsFromAppleCalendar()
+                    }
+                }
         }
         .defaultSize(width: 1320, height: 760)
         .windowStyle(.hiddenTitleBar)

@@ -75,16 +75,40 @@ struct SearchField: View {
     var placeholder: String
     @Binding var text: String
 
+    private var hasText: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
+            if hasText {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary.opacity(0.82))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
+        .background(
+            hasText ? Color.workLogSkyBlue.opacity(0.10) : Color.primary.opacity(0.045),
+            in: RoundedRectangle(cornerRadius: 7)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(
+                    hasText ? Color.workLogSkyBlue.opacity(0.32) : Color.clear,
+                    lineWidth: hasText ? 1 : 0
+                )
+        }
         .frame(width: 280)
     }
 }
@@ -101,6 +125,10 @@ extension View {
 
     func workLogHoverOutline(cornerRadius: CGFloat = 8) -> some View {
         modifier(WorkLogHoverOutlineModifier(cornerRadius: cornerRadius))
+    }
+
+    func workLogFilterHighlight(isActive: Bool, cornerRadius: CGFloat = 7) -> some View {
+        modifier(WorkLogFilterHighlightModifier(isActive: isActive, cornerRadius: cornerRadius))
     }
 }
 
@@ -130,6 +158,26 @@ private struct WorkLogHoverOutlineModifier: ViewModifier {
             .animation(.easeOut(duration: 0.14), value: isHovering)
             .onHover { hovering in
                 isHovering = hovering
+            }
+    }
+}
+
+private struct WorkLogFilterHighlightModifier: ViewModifier {
+    var isActive: Bool
+    var cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                isActive ? Color.workLogSkyBlue.opacity(0.10) : Color.primary.opacity(0.045),
+                in: RoundedRectangle(cornerRadius: cornerRadius)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .stroke(
+                        isActive ? Color.workLogSkyBlue.opacity(0.32) : Color.clear,
+                        lineWidth: isActive ? 1 : 0
+                    )
             }
     }
 }
@@ -777,11 +825,6 @@ struct TableHeaderFontInstaller: NSViewRepresentable {
             requiresFullHeightInvalidation = true
         }
 
-        if tableView.columnAutoresizingStyle != .noColumnAutoresizing {
-            tableView.columnAutoresizingStyle = .noColumnAutoresizing
-            requiresFullHeightInvalidation = true
-        }
-
         if tableView.enclosingScrollView?.hasHorizontalScroller != true {
             tableView.enclosingScrollView?.hasHorizontalScroller = true
         }
@@ -794,23 +837,6 @@ struct TableHeaderFontInstaller: NSViewRepresentable {
             if !(column.headerCell is WorkLogTableHeaderCell) || column.headerCell.stringValue != title {
                 column.headerCell = WorkLogTableHeaderCell(textCell: title)
                 headerNeedsDisplay = true
-            }
-
-            let fixedWidth = max(column.width, column.minWidth)
-            if fixedWidth > 1 {
-                let needsWidthUpdate =
-                    abs(column.width - fixedWidth) > 0.5 ||
-                    abs(column.minWidth - fixedWidth) > 0.5 ||
-                    abs(column.maxWidth - fixedWidth) > 0.5 ||
-                    !column.resizingMask.isEmpty
-
-                if needsWidthUpdate {
-                    column.width = fixedWidth
-                    column.minWidth = fixedWidth
-                    column.maxWidth = fixedWidth
-                    column.resizingMask = []
-                    requiresFullHeightInvalidation = true
-                }
             }
         }
 

@@ -18,18 +18,48 @@ struct DocumentsView: View {
         filteredDocuments(search: searchText, company: selectedCompany, type: selectedType)
     }
 
+    private var searchedDocuments: [DocumentRecord] {
+        store.filteredDocuments(search: searchText)
+    }
+
     private var availableCompanies: [String] {
         store.availableCompanyOptions
     }
 
-    private var availableDocumentCompanies: [String] {
+    private var allDocumentCompanies: [String] {
         AppStore.availableCompanies(in: AppData(documents: store.data.documents))
     }
 
-    private var availableDocumentTypes: [DocumentKind] {
+    private var availableDocumentCompanies: [String] {
+        let matchingDocuments = searchedDocuments.filter { document in
+            matchesSelectedType(document, selectedType: selectedType)
+        }
+        var companies = AppStore.availableCompanies(in: AppData(documents: matchingDocuments))
+        if !selectedCompany.isEmpty,
+           !companies.contains(where: { $0.localizedCaseInsensitiveCompare(selectedCompany) == .orderedSame }) {
+            companies.append(selectedCompany.collapsedWhitespace)
+        }
+        return companies
+    }
+
+    private var allDocumentTypes: [DocumentKind] {
         DocumentKind.allCases.filter { kind in
             store.data.documents.contains { $0.kind == kind }
         }
+    }
+
+    private var availableDocumentTypes: [DocumentKind] {
+        let matchingDocuments = searchedDocuments.filter { document in
+            matchesSelectedCompany(document, selectedCompany: selectedCompany)
+        }
+        var kinds = DocumentKind.allCases.filter { kind in
+            matchingDocuments.contains { $0.kind == kind }
+        }
+        if let selectedKind = DocumentKind(rawValue: selectedType),
+           !kinds.contains(selectedKind) {
+            kinds.append(selectedKind)
+        }
+        return kinds
     }
 
     private var outlinedRowIndex: Int? {
@@ -83,19 +113,21 @@ struct DocumentsView: View {
                 .pickerStyle(.menu)
                 .tint(selectedCompany.isEmpty ? .secondary : .workLogSkyBlue)
                 .frame(width: 190)
-                .opacity(selectedCompany.isEmpty ? 0.62 : 1)
+                .opacity(selectedCompany.isEmpty ? 0.72 : 1)
+                .workLogFilterHighlight(isActive: !selectedCompany.isEmpty)
 
                 Picker("Type", selection: typeFilterBinding) {
                     Text("All Types").tag("")
                     ForEach(availableDocumentTypes) { kind in
-                        Text(kind.rawValue).tag(kind.rawValue)
+                        Text(kind.displayName).tag(kind.rawValue)
                     }
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
                 .tint(selectedType.isEmpty ? .secondary : .workLogSkyBlue)
                 .frame(width: 150)
-                .opacity(selectedType.isEmpty ? 0.62 : 1)
+                .opacity(selectedType.isEmpty ? 0.72 : 1)
+                .workLogFilterHighlight(isActive: !selectedType.isEmpty)
 
                 IconOnlyActionButton("Import", systemImage: "square.and.arrow.down") {
                     searchText = ""
@@ -113,7 +145,7 @@ struct DocumentsView: View {
                     .width(480)
 
                     TableColumn("Type") { document in
-                        TableValueText(value: document.kind.rawValue)
+                        TableValueText(value: document.kind.displayName)
                     }
                     .width(210)
 
@@ -302,14 +334,14 @@ struct DocumentsView: View {
 
     private func normalizeFilters() {
         if !selectedCompany.isEmpty,
-           !availableDocumentCompanies.contains(where: {
+           !allDocumentCompanies.contains(where: {
                $0.localizedCaseInsensitiveCompare(selectedCompany) == .orderedSame
            }) {
             selectedCompany = ""
         }
 
         if !selectedType.isEmpty,
-           !availableDocumentTypes.contains(where: { $0.rawValue == selectedType }) {
+           !allDocumentTypes.contains(where: { $0.rawValue == selectedType }) {
             selectedType = ""
         }
     }
@@ -341,7 +373,9 @@ private struct DocumentDetailView: View {
     var onClose: () -> Void
     var onDelete: () -> Void
     @State private var showDeleteConfirmation = false
+    @State private var draftDocument = DocumentRecord()
     @State private var draftFileName: String = ""
+    @State private var saveErrorMessage: String = ""
 
     var body: some View {
         ScrollView {
@@ -377,8 +411,15 @@ private struct DocumentDetailView: View {
                     }
 
                 if isEditing {
+                    if !saveErrorMessage.isBlank {
+                        Text(saveErrorMessage)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
                     DocumentEditForm(
-                        document: $document,
+                        document: $draftDocument,
                         fileName: $draftFileName,
                         availableCompanyOptions: availableCompanyOptions
                     )
@@ -399,25 +440,35 @@ private struct DocumentDetailView: View {
         } message: {
             Text("This will permanently remove the selected document.")
         }
-        .onDisappear {
-            commitPendingRename()
+        .onAppear {
+            resetDraft()
         }
     }
 
     private func toggleEditing() {
         if isEditing {
-            commitPendingRename()
+            saveDraft()
         } else {
-            draftFileName = document.storedFileName.isBlank ? document.name : document.storedFileName
+            resetDraft()
+            saveErrorMessage = ""
+            isEditing = true
         }
-        isEditing.toggle()
     }
 
-    private func commitPendingRename() {
-        let trimmedDraft = draftFileName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let currentName = document.storedFileName.isBlank ? document.name : document.storedFileName
-        guard !trimmedDraft.isEmpty, trimmedDraft != currentName else { return }
-        store.renameDocument(id: document.id, to: trimmedDraft)
+    private func resetDraft() {
+        draftDocument = document
+        draftFileName = document.displayFileName
+    }
+
+    private func saveDraft() {
+        do {
+            try store.saveDocumentEdits(id: document.id, draft: draftDocument, desiredFileName: draftFileName)
+            saveErrorMessage = ""
+            isEditing = false
+            resetDraft()
+        } catch {
+            saveErrorMessage = error.localizedDescription
+        }
     }
 }
 
@@ -561,7 +612,7 @@ private struct DocumentReadOnlyView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             ReadOnlyDetailField(title: "Name", value: displayName, hideWhenEmpty: false)
-            ReadOnlyDetailField(title: "Type", value: document.kind.rawValue, hideWhenEmpty: false)
+            ReadOnlyDetailField(title: "Type", value: document.kind.displayName, hideWhenEmpty: false)
             ReadOnlyDetailField(title: "Size", value: ByteCountFormatter.string(fromByteCount: document.fileSizeBytes, countStyle: .file), hideWhenEmpty: false)
             ReadOnlyDetailField(title: "Modified", value: document.fileModifiedAt.map(AppDateFormatters.short) ?? "", hideWhenEmpty: false)
             ReadOnlyDetailField(title: "Created", value: document.fileCreatedAt.map(AppDateFormatters.short) ?? "", hideWhenEmpty: false)
@@ -586,7 +637,7 @@ private struct DocumentEditForm: View {
             FieldRow(title: "Type") {
                 Picker("", selection: $document.kind) {
                     ForEach(DocumentKind.allCases) { kind in
-                        Text(kind.rawValue).tag(kind)
+                        Text(kind.displayName).tag(kind)
                     }
                 }
                 .labelsHidden()

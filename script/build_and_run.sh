@@ -43,6 +43,7 @@ SOURCE_FILES=(
   "$ROOT_DIR/Sources/WorkLog/Services/DocumentStorageService.swift"
   "$ROOT_DIR/Sources/WorkLog/Services/BackupService.swift"
   "$ROOT_DIR/Sources/WorkLog/Services/TaskImportService.swift"
+  "$ROOT_DIR/Sources/WorkLog/Services/CalendarInterviewImportService.swift"
   "$ROOT_DIR/Sources/WorkLog/Stores/AppStore.swift"
   "$ROOT_DIR/Sources/WorkLog/Views/ContentView.swift"
   "$ROOT_DIR/Sources/WorkLog/Views/DashboardView.swift"
@@ -107,6 +108,10 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$MIN_SYSTEM_VERSION</string>
   <key>NSHumanReadableCopyright</key>
   <string>$COPYRIGHT_TEXT</string>
+  <key>NSCalendarsUsageDescription</key>
+  <string>Work Log reads interview events from your calendars so you can import them into Interview Tracker.</string>
+  <key>NSCalendarsFullAccessUsageDescription</key>
+  <string>Work Log reads interview events from your calendars so you can import their schedule and meeting details into Interview Tracker.</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
   <key>WorkLogEnableDemoData</key>

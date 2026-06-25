@@ -15,10 +15,19 @@ struct WorkExperienceView: View {
         filteredEntries(search: searchText, tag: selectedTag)
     }
 
+    private var searchedEntries: [WorkExperience] {
+        store.filteredWorkExperiences(search: searchText)
+    }
+
     private var availableTags: [String] {
-        let savedTags = store.data.workExperiences.flatMap { tags(in: $0.tags) }
-        let customTags = savedTags.filter { !WorkExperienceTagOptions.all.contains($0) }
-        return WorkExperienceTagOptions.all + customTags.uniqued()
+        let visibleTags = searchedEntries.flatMap { tags(in: $0.tags) }.uniqued()
+        let presentTagSet = Set(visibleTags)
+        let defaultTags = WorkExperienceTagOptions.all.filter { presentTagSet.contains($0) }
+        var options = defaultTags + visibleTags.filter { !WorkExperienceTagOptions.all.contains($0) }
+        if !selectedTag.isEmpty && !options.contains(selectedTag) {
+            options.append(selectedTag)
+        }
+        return options
     }
 
     private var availableSkills: [String] {
@@ -78,6 +87,10 @@ struct WorkExperienceView: View {
         return hasher.finalize()
     }
 
+    private var tableIdentity: String {
+        "\(searchText)|\(selectedTag)|\(tableLayoutSignature)"
+    }
+
     private var selectionBinding: Binding<UUID?> {
         Binding(
             get: { store.selectedWorkID },
@@ -109,7 +122,8 @@ struct WorkExperienceView: View {
                 .pickerStyle(.menu)
                 .tint(selectedTag.isEmpty ? .secondary : .workLogSkyBlue)
                 .frame(width: 180)
-                .opacity(selectedTag.isEmpty ? 0.62 : 1)
+                .opacity(selectedTag.isEmpty ? 0.72 : 1)
+                .workLogFilterHighlight(isActive: !selectedTag.isEmpty)
 
                 IconOnlyActionButton("Add", systemImage: "plus") {
                     searchText = ""
@@ -191,6 +205,7 @@ struct WorkExperienceView: View {
                     }
                     .width(400)
                 }
+                .id(tableIdentity)
                 .frame(minWidth: 0, maxWidth: .infinity)
                 .background(
                     TableHeaderFontInstaller(
@@ -202,9 +217,9 @@ struct WorkExperienceView: View {
                 )
             } detail: {
                 if let id = store.selectedWorkID,
-                   let binding = store.bindingForWorkExperience(id: id) {
+                   let entry = store.workExperience(id: id) {
                     WorkExperienceDetailView(
-                        entry: binding,
+                        entry: entry,
                         isEditing: $isEditing,
                         availableSkillOptions: availableSkills,
                         dropdownOptions: dropdownOptions,
@@ -350,7 +365,8 @@ struct WorkExperienceView: View {
 }
 
 private struct WorkExperienceDetailView: View {
-    @Binding var entry: WorkExperience
+    @EnvironmentObject private var store: AppStore
+    var entry: WorkExperience
     @Binding var isEditing: Bool
     var availableSkillOptions: [String]
     var dropdownOptions: WorkExperienceDropdownOptions
@@ -358,6 +374,7 @@ private struct WorkExperienceDetailView: View {
     var onDelete: () -> Void
     @State private var showDeleteConfirmation = false
     @State private var selectedTab: WorkExperienceDetailTab = .overview
+    @State private var draftEntry = WorkExperience()
 
     var body: some View {
         ScrollView {
@@ -366,7 +383,7 @@ private struct WorkExperienceDetailView: View {
                     isEditing: isEditing,
                     onClose: onClose,
                     onToggleEditing: {
-                        isEditing.toggle()
+                        toggleEditing()
                     },
                     onDelete: {
                         showDeleteConfirmation = true
@@ -384,7 +401,7 @@ private struct WorkExperienceDetailView: View {
 
                 if isEditing {
                     WorkExperienceEditForm(
-                        entry: $entry,
+                        entry: $draftEntry,
                         availableSkillOptions: availableSkillOptions,
                         dropdownOptions: dropdownOptions,
                         selectedTab: selectedTab
@@ -406,6 +423,27 @@ private struct WorkExperienceDetailView: View {
         } message: {
             Text("This will permanently remove the selected work experience entry.")
         }
+        .onAppear {
+            resetDraft()
+        }
+    }
+
+    private func toggleEditing() {
+        if isEditing {
+            saveDraft()
+        } else {
+            resetDraft()
+            isEditing = true
+        }
+    }
+
+    private func resetDraft() {
+        draftEntry = entry
+    }
+
+    private func saveDraft() {
+        store.saveWorkExperienceEdits(id: entry.id, draft: draftEntry)
+        isEditing = false
     }
 }
 

@@ -306,6 +306,20 @@ struct WorkExperience: Identifiable, Codable, Hashable {
         .joined(separator: " ")
     }
 
+    var tableSearchText: String {
+        [
+            company,
+            designation,
+            role,
+            projectProduct,
+            team,
+            feature,
+            task,
+            tags
+        ]
+        .joined(separator: " ")
+    }
+
     var dateSummaryText: String {
         usesDateLogic ? AppDateFormatters.range(start: startDate, end: endDate) : "Unknown"
     }

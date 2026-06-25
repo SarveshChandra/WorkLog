@@ -472,7 +472,7 @@ enum DemoDataFactory {
                         date: daysAgo(2),
                         roundName: "Technical deep dive",
                         interviewer: "Reliability panel",
-                        result: "Pending",
+                        result: "Completed",
                         feedback: "Discussed production issue and release automation examples."
                     )
                 ],
@@ -598,7 +598,7 @@ enum DemoDataFactory {
     }
 
     static func demoDocumentText(for fileName: String) -> (title: String, body: String)? {
-        switch fileName {
+        switch URL(fileURLWithPath: fileName).lastPathComponent {
         case "demo-backend-resume.pdf":
             ("Backend Resume Demo", "This placeholder PDF lets you test document storage, metadata editing, open, and reveal actions.")
         case "demo-offer-letter.pdf":
