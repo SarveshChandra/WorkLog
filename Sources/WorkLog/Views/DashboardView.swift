@@ -1048,7 +1048,7 @@ private struct DashboardHighlights {
         interviewOpportunities: [InterviewOpportunity],
         now: Date = Date()
     ) {
-        incompleteTasks = Self.sortedWorkExperiences(workExperiences)
+        incompleteTasks = workExperiences
             .filter { !$0.isCompleteForTaskList }
             .map(DashboardTaskSummary.init)
 
@@ -1100,18 +1100,6 @@ private struct DashboardHighlights {
 
     var isEmpty: Bool {
         incompleteTasks.isEmpty && upcomingRounds.isEmpty && followUpActions.isEmpty
-    }
-
-    private static func sortedWorkExperiences(_ entries: [WorkExperience]) -> [WorkExperience] {
-        entries.sorted { lhs, rhs in
-            if lhs.sortDate == rhs.sortDate {
-                if lhs.usesDateLogic && rhs.usesDateLogic, lhs.startDate != rhs.startDate {
-                    return lhs.startDate > rhs.startDate
-                }
-                return lhs.updatedAt > rhs.updatedAt
-            }
-            return lhs.sortDate > rhs.sortDate
-        }
     }
 }
 

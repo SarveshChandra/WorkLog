@@ -204,18 +204,8 @@ final class AppStore: ObservableObject {
 
     nonisolated static func filteredWorkExperiences(in workExperiences: [WorkExperience], search: String) -> [WorkExperience] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        let sorted = workExperiences.sorted { lhs, rhs in
-            if lhs.sortDate == rhs.sortDate {
-                if lhs.usesDateLogic && rhs.usesDateLogic, lhs.startDate != rhs.startDate {
-                    return lhs.startDate > rhs.startDate
-                }
-                return lhs.updatedAt > rhs.updatedAt
-            }
-            return lhs.sortDate > rhs.sortDate
-        }
-
-        guard !query.isEmpty else { return sorted }
-        return sorted.filter { $0.tableSearchText.localizedCaseInsensitiveContains(query) }
+        guard !query.isEmpty else { return workExperiences }
+        return workExperiences.filter { $0.tableSearchText.localizedCaseInsensitiveContains(query) }
     }
 
     func cachedDashboardInsight(for taskSnapshotHash: String) -> DashboardInsightCache? {

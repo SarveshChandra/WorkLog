@@ -1405,6 +1405,39 @@ final class InterviewAndDocumentLogicTests: XCTestCase {
         XCTAssertEqual(filtered.map(\.company), ["Distributed Systems Co"])
     }
 
+    func testFilteredWorkExperiencesPreserveSourceOrderAcrossUpdates() {
+        let insertedFirst = WorkExperience(
+            company: "Acme",
+            task: "First inserted",
+            usesDateLogic: false,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_100),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+        let insertedSecond = WorkExperience(
+            company: "Beta",
+            task: "Second inserted",
+            usesDateLogic: false,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let updatedSecond = AppStore.updatedWorkExperience(
+            existing: insertedSecond,
+            draft: WorkExperience(
+                company: "Beta",
+                task: "Second inserted updated",
+                usesDateLogic: false
+            ),
+            now: Date(timeIntervalSince1970: 1_700_086_400)
+        )
+
+        let filtered = AppStore.filteredWorkExperiences(
+            in: [insertedFirst, updatedSecond],
+            search: ""
+        )
+
+        XCTAssertEqual(filtered.map(\.task), ["First inserted", "Second inserted updated"])
+    }
+
     func testWorkExperiencePlannerReindexPreservesCurrentArrayOrder() {
         var entry = WorkExperience(
             task: "Planner task",
