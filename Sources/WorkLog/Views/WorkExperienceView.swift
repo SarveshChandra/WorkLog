@@ -604,7 +604,6 @@ private struct WorkExperienceEditForm: View {
                         company: $entry.company,
                         options: dropdownOptions.company
                     )
-                    .frame(maxWidth: 260, alignment: .leading)
                 }
 
                 WorkFieldRow(title: "Designation") {
@@ -618,7 +617,6 @@ private struct WorkExperienceEditForm: View {
                         selection: $entry.designation,
                         options: dropdownOptions.designation
                     )
-                    .frame(maxWidth: 260, alignment: .leading)
                 }
 
                 WorkFieldRow(title: "Role") {
@@ -632,7 +630,6 @@ private struct WorkExperienceEditForm: View {
                         selection: $entry.role,
                         options: dropdownOptions.role
                     )
-                    .frame(maxWidth: 260, alignment: .leading)
                 }
 
                 WorkFieldRow(title: "Product / Project") {
@@ -646,7 +643,6 @@ private struct WorkExperienceEditForm: View {
                         selection: $entry.projectProduct,
                         options: dropdownOptions.projectProduct
                     )
-                    .frame(maxWidth: 260, alignment: .leading)
                 }
 
                 WorkFieldRow(title: "Team") {
@@ -660,7 +656,6 @@ private struct WorkExperienceEditForm: View {
                         selection: $entry.team,
                         options: dropdownOptions.team
                     )
-                    .frame(maxWidth: 260, alignment: .leading)
                 }
 
                 WorkFieldRow(title: "Feature") {
@@ -674,7 +669,6 @@ private struct WorkExperienceEditForm: View {
                         selection: $entry.feature,
                         options: dropdownOptions.feature
                     )
-                    .frame(maxWidth: 260, alignment: .leading)
                 }
 
                 LabeledTextEditor(title: "Situation", text: $entry.situation, minHeight: 80)
@@ -749,6 +743,7 @@ private struct WorkFieldRow<Content: View>: View {
                 .font(.workLogDetailPaneLabel)
                 .foregroundStyle(.workLogHeaderText)
             content
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -1204,6 +1199,7 @@ private struct MultiSelectTagMenu: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
             .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
@@ -1275,6 +1271,7 @@ private struct MultiSelectSkillPicker: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 9)
             .padding(.vertical, 7)
             .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))

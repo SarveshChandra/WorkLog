@@ -641,7 +641,7 @@ private struct DocumentEditForm: View {
                     }
                 }
                 .labelsHidden()
-                .frame(maxWidth: 190)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             ReadOnlyDetailField(title: "Size", value: ByteCountFormatter.string(fromByteCount: document.fileSizeBytes, countStyle: .file), hideWhenEmpty: false)
@@ -654,7 +654,6 @@ private struct DocumentEditForm: View {
                     company: $document.company,
                     options: availableCompanyOptions
                 )
-                .frame(maxWidth: 260, alignment: .leading)
             }
 
             FieldRow(title: "Original File") {

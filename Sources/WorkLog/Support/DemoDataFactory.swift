@@ -291,8 +291,17 @@ enum DemoDataFactory {
                 stage: "L2 technical",
                 appliedDate: daysAgo(18),
                 lastActivityDate: daysAgo(1),
-                nextAction: "Prepare concurrency and SwiftUI table examples",
-                nextActionDueDate: daysFromNow(1),
+                followUps: [
+                    InterviewFollowUp(
+                        action: "Prepare concurrency and SwiftUI table examples",
+                        dueDate: daysFromNow(1)
+                    ),
+                    InterviewFollowUp(
+                        action: "Send updated resume variant",
+                        dueDate: daysAgo(2),
+                        isCompleted: true
+                    )
+                ],
                 hasReferral: true,
                 referralChannel: "LinkedIn",
                 referralProfileName: "Aarav Mehta",
@@ -333,8 +342,12 @@ enum DemoDataFactory {
                 stage: "Take-home submitted",
                 appliedDate: daysAgo(9),
                 lastActivityDate: daysAgo(3),
-                nextAction: "Follow up on take-home feedback",
-                nextActionDueDate: daysFromNow(2),
+                followUps: [
+                    InterviewFollowUp(
+                        action: "Follow up on take-home feedback",
+                        dueDate: daysFromNow(2)
+                    )
+                ],
                 hasReferral: false,
                 referralStatus: "Not Applicable",
                 cooldownPeriodDays: nil,
@@ -364,8 +377,12 @@ enum DemoDataFactory {
                 stage: "Closed",
                 appliedDate: daysAgo(95),
                 lastActivityDate: daysAgo(70),
-                nextAction: "Eligible to apply again",
-                nextActionDueDate: daysFromNow(0),
+                followUps: [
+                    InterviewFollowUp(
+                        action: "Eligible to apply again",
+                        dueDate: daysFromNow(0)
+                    )
+                ],
                 hasReferral: true,
                 referralChannel: "Former coworker",
                 referralProfileName: "Neha Kapoor",
@@ -399,8 +416,12 @@ enum DemoDataFactory {
                 stage: "Applied",
                 appliedDate: daysAgo(1),
                 lastActivityDate: daysAgo(1),
-                nextAction: "Find referral PoC",
-                nextActionDueDate: daysFromNow(3),
+                followUps: [
+                    InterviewFollowUp(
+                        action: "Find referral PoC",
+                        dueDate: daysFromNow(3)
+                    )
+                ],
                 hasReferral: false,
                 referralStatus: "To Ask",
                 cooldownPeriodDays: nil,
@@ -422,8 +443,12 @@ enum DemoDataFactory {
                 stage: "",
                 appliedDate: daysAgo(5),
                 lastActivityDate: daysAgo(1),
-                nextAction: "Share availability and confirm first round",
-                nextActionDueDate: daysFromNow(1),
+                followUps: [
+                    InterviewFollowUp(
+                        action: "Share availability and confirm first round",
+                        dueDate: daysFromNow(1)
+                    )
+                ],
                 hasReferral: true,
                 referralChannel: "Alumni network",
                 referralProfileName: "Ishaan Rao",
@@ -449,8 +474,17 @@ enum DemoDataFactory {
                 stage: "",
                 appliedDate: daysAgo(21),
                 lastActivityDate: daysAgo(2),
-                nextAction: "Prepare incident and capacity planning stories",
-                nextActionDueDate: daysFromNow(2),
+                followUps: [
+                    InterviewFollowUp(
+                        action: "Prepare incident and capacity planning stories",
+                        dueDate: daysFromNow(2)
+                    ),
+                    InterviewFollowUp(
+                        action: "Send thank-you note",
+                        dueDate: daysAgo(1),
+                        isCompleted: true
+                    )
+                ],
                 hasReferral: false,
                 referralStatus: "Not Applicable",
                 cooldownPeriodDays: nil,
@@ -487,8 +521,7 @@ enum DemoDataFactory {
                 stage: "",
                 appliedDate: daysAgo(55),
                 lastActivityDate: daysAgo(35),
-                nextAction: "",
-                nextActionDueDate: nil,
+                followUps: [],
                 hasReferral: false,
                 referralStatus: "Not Applicable",
                 cooldownPeriodDays: 90,
@@ -518,8 +551,9 @@ enum DemoDataFactory {
                 stage: "",
                 appliedDate: daysAgo(130),
                 lastActivityDate: daysAgo(100),
-                nextAction: "Eligible to retry with platform resume",
-                nextActionDueDate: nil,
+                followUps: [
+                    InterviewFollowUp(action: "Eligible to retry with platform resume")
+                ],
                 hasReferral: true,
                 referralChannel: "Community Slack",
                 referralProfileName: "Sana Malik",

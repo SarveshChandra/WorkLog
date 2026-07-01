@@ -385,6 +385,7 @@ struct SingleSelectAddablePicker: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 9)
             .padding(.vertical, 7)
             .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
@@ -569,6 +570,7 @@ struct FieldRow<Content: View>: View {
                 .foregroundStyle(.workLogHeaderText)
                 .frame(width: 128, alignment: .trailing)
             content
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

@@ -107,7 +107,7 @@ struct DashboardView: View {
                 systemImage: "bell.badge"
             ) {
                 if highlights.followUpActions.isEmpty {
-                    DashboardEmptyState(text: "No active follow-up actions.")
+                    DashboardEmptyState(text: "No active or due follow-up actions.")
                 } else {
                     VStack(alignment: .leading, spacing: 12) {
                         ForEach(highlights.followUpActions) { item in
@@ -1077,16 +1077,26 @@ private struct DashboardHighlights {
             }
 
         followUpActions = interviewOpportunities
-            .compactMap { opportunity in
-                guard opportunity.hasCurrentFollowUp(relativeTo: now),
-                      let dueDate = opportunity.currentNextActionDueDate else {
-                    return nil
+            .flatMap { opportunity in
+                opportunity.activeOrDueFollowUps(relativeTo: now).map { followUp in
+                    DashboardFollowUpSummary(opportunity: opportunity, followUp: followUp, now: now)
                 }
-                return DashboardFollowUpSummary(opportunity: opportunity, dueDate: dueDate)
             }
             .sorted { lhs, rhs in
-                if lhs.dueDate != rhs.dueDate {
-                    return lhs.dueDate < rhs.dueDate
+                if lhs.statusSortPriority != rhs.statusSortPriority {
+                    return lhs.statusSortPriority < rhs.statusSortPriority
+                }
+                switch (lhs.dueDate, rhs.dueDate) {
+                case let (.some(lhsDate), .some(rhsDate)):
+                    if lhsDate != rhsDate {
+                        return lhsDate < rhsDate
+                    }
+                case (.some, .none):
+                    return true
+                case (.none, .some):
+                    return false
+                case (.none, .none):
+                    break
                 }
                 if lhs.company != rhs.company {
                     return lhs.company.localizedCaseInsensitiveCompare(rhs.company) == .orderedAscending
@@ -1177,28 +1187,36 @@ private struct DashboardFollowUpSummary: Identifiable {
     let company: String
     let role: String
     let action: String
-    let dueDate: Date
+    let dueDate: Date?
     let dueText: String
     let linkedRoundName: String
     let badgeText: String
     let badgeTint: Color
+    let statusSortPriority: Int
 
-    init(opportunity: InterviewOpportunity, dueDate: Date) {
-        id = opportunity.id.uuidString
+    init(opportunity: InterviewOpportunity, followUp: InterviewFollowUp, now: Date = Date()) {
+        id = "\(opportunity.id.uuidString)-\(followUp.id.uuidString)"
         company = opportunity.company.isBlank ? "Untitled company" : opportunity.company
         role = opportunity.role.isBlank ? "Role not set" : opportunity.role
-        action = opportunity.currentNextAction.isBlank ? "Not set" : opportunity.currentNextAction
-        self.dueDate = dueDate
-        dueText = AppDateFormatters.calendarDateTime.string(from: dueDate)
-        if let linkedRoundID = opportunity.nextActionLinkedRoundID,
-           let roundName = opportunity.interviewRounds.first(where: { $0.id == linkedRoundID })?.roundName,
-           !roundName.isBlank {
-            linkedRoundName = roundName
-        } else {
-            linkedRoundName = ""
+        action = followUp.actionLabel
+        dueDate = followUp.dueDate
+        dueText = followUp.dueDate.map(AppDateFormatters.calendarDateTime.string(from:)) ?? "No due date"
+        linkedRoundName = opportunity.linkedRoundName(for: followUp)
+
+        switch followUp.status(relativeTo: now) {
+        case .due:
+            badgeText = InterviewFollowUpStatus.due.rawValue
+            badgeTint = .workLogDoingYellow
+            statusSortPriority = 0
+        case .active:
+            badgeText = InterviewFollowUpStatus.active.rawValue
+            badgeTint = .workLogSkyBlue
+            statusSortPriority = 1
+        case .completed:
+            badgeText = InterviewFollowUpStatus.completed.rawValue
+            badgeTint = .secondary
+            statusSortPriority = 2
         }
-        badgeText = "Follow-up"
-        badgeTint = .workLogDoingYellow
     }
 }
 

@@ -375,7 +375,14 @@ struct InterviewTrackerView: View {
     }
 
     private func nextActionLabel(for opportunity: InterviewOpportunity) -> String {
-        opportunity.currentNextAction.isBlank ? "Not set" : opportunity.currentNextAction
+        let followUps = opportunity.activeOrDueFollowUps()
+        guard let firstFollowUp = followUps.first else {
+            return "Not set"
+        }
+        if followUps.count == 1 {
+            return firstFollowUp.actionLabel
+        }
+        return "\(firstFollowUp.actionLabel) +\(followUps.count - 1) more"
     }
 
     private func dateLabel(_ date: Date?) -> String {
@@ -616,8 +623,22 @@ private struct InterviewOpportunityReadOnlyView: View {
 
     private var followUpContent: some View {
         InterviewDetailSection {
-            ReadOnlyDetailField(title: "Action", value: opportunity.nextAction)
-            ReadOnlyDetailField(title: "Due Date", value: AppDateFormatters.short(opportunity.nextActionDueDate))
+            Text("Follow-ups")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.workLogHeaderText)
+
+            if opportunity.followUps.isEmpty {
+                Text("No follow-ups added.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(opportunity.followUps) { followUp in
+                    InterviewFollowUpReadOnlyRow(
+                        followUp: followUp,
+                        linkedRoundName: opportunity.linkedRoundName(for: followUp)
+                    )
+                }
+            }
+
             ReadOnlyDetailField(title: "Cooldown Period", value: opportunity.cooldownPeriodLabel)
             ReadOnlyDetailField(title: "Re-Eligible Date", value: AppDateFormatters.short(opportunity.cooldownEligibleDate))
         }
@@ -659,7 +680,7 @@ private struct InterviewOpportunityReadOnlyView: View {
                             .foregroundStyle(.secondary)
                         ReadOnlyDetailField(title: "Interviewer", value: round.interviewer)
                         ReadOnlyDetailField(title: "Status", value: round.normalizedStatusValue())
-                        ReadOnlyDetailField(title: "Feedback", value: round.feedback, isLong: true)
+                        ReadOnlyDetailField(title: "Questions/Feedback", value: round.feedback, isLong: true)
                         if round.isImportedFromCalendar {
                             ReadOnlyDetailField(title: "Calendar", value: round.calendarTitle ?? "")
                             ReadOnlyDetailField(title: "Location", value: round.calendarLocation ?? "")
@@ -720,7 +741,7 @@ private struct InterviewOpportunityEditForm: View {
                         }
                     }
                     .labelsHidden()
-                    .frame(maxWidth: 180)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Text(opportunity.displayStatus.isBlank ? "Not set" : opportunity.displayStatus)
                         .foregroundStyle((opportunity.displayStatus.isBlank ? "Not set" : opportunity.displayStatus).workLogDisplayColor())
@@ -764,15 +785,24 @@ private struct InterviewOpportunityEditForm: View {
 
     private var followUpFields: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Toggle("Follow-up?", isOn: followUpBinding)
-                .toggleStyle(.checkbox)
+            Text("Follow-ups")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.workLogHeaderText)
 
-            if shouldShowFollowUpFields {
-                InterviewEditField(title: "Action") {
-                    TextField("Follow up, prepare, wait, reapply, etc.", text: $opportunity.nextAction)
+            if opportunity.followUps.isEmpty {
+                Text("No follow-ups yet.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(followUpIndices, id: \.self) { index in
+                    InterviewFollowUpEditor(
+                        followUp: $opportunity.followUps[index],
+                        linkedRoundName: opportunity.linkedRoundName(for: opportunity.followUps[index])
+                    )
                 }
+            }
 
-                InterviewFollowUpDateField(date: $opportunity.nextActionDueDate)
+            IconOnlyActionButton("Add Follow-up", systemImage: "plus.circle") {
+                opportunity.followUps.append(InterviewFollowUp.manualDefault())
             }
 
             InterviewCooldownField(
@@ -807,7 +837,7 @@ private struct InterviewOpportunityEditForm: View {
                         }
                     }
                     .labelsHidden()
-                    .frame(maxWidth: 190)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 LabeledTextEditor(title: "Referral Notes", text: $opportunity.referralNotes, minHeight: 80)
@@ -843,6 +873,10 @@ private struct InterviewOpportunityEditForm: View {
         Array(opportunity.interviewRounds.indices)
     }
 
+    private var followUpIndices: [Int] {
+        Array(opportunity.followUps.indices)
+    }
+
     private var referralInvolvedBinding: Binding<Bool> {
         Binding(
             get: { opportunity.hasReferral },
@@ -855,33 +889,6 @@ private struct InterviewOpportunityEditForm: View {
         )
     }
 
-    private var hasFollowUp: Bool {
-        opportunity.hasCurrentFollowUp()
-    }
-
-    private var shouldShowFollowUpFields: Bool {
-        opportunity.hasFollowUpRecord
-    }
-
-    private var followUpBinding: Binding<Bool> {
-        Binding(
-            get: { hasFollowUp },
-            set: { isEnabled in
-                if isEnabled {
-                    if opportunity.nextActionDueDate == nil || !opportunity.hasCurrentFollowUp() {
-                        opportunity.nextActionDueDate = InterviewOpportunity.defaultManualFollowUpDueDate()
-                    }
-                    opportunity.nextActionLinkedRoundID = nil
-                    opportunity.nextActionWasAutoGenerated = false
-                } else {
-                    opportunity.nextAction = ""
-                    opportunity.nextActionDueDate = nil
-                    opportunity.nextActionLinkedRoundID = nil
-                    opportunity.nextActionWasAutoGenerated = false
-                }
-            }
-        )
-    }
 }
 
 private struct InterviewDetailSection<Content: View>: View {
@@ -946,6 +953,15 @@ private struct InterviewOptionalDateField: View {
 private struct InterviewFollowUpDateField: View {
     @Binding var date: Date?
 
+    private var hasDueDateBinding: Binding<Bool> {
+        Binding(
+            get: { date != nil },
+            set: { isEnabled in
+                date = isEnabled ? (date ?? InterviewOpportunity.defaultManualFollowUpDueDate()) : nil
+            }
+        )
+    }
+
     private var dateBinding: Binding<Date> {
         Binding(
             get: { date ?? Date() },
@@ -966,15 +982,19 @@ private struct InterviewFollowUpDateField: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Due Date & Time")
-                .font(.callout)
-                .foregroundStyle(.workLogHeaderText)
+            Toggle("Due Date & Time", isOn: hasDueDateBinding)
+                .toggleStyle(.checkbox)
 
-            DatePicker("", selection: dateBinding, displayedComponents: .date)
-                .labelsHidden()
+            if date != nil {
+                DatePicker("", selection: dateBinding, displayedComponents: .date)
+                    .labelsHidden()
 
-            DatePicker("", selection: timeBinding, displayedComponents: .hourAndMinute)
-                .labelsHidden()
+                DatePicker("", selection: timeBinding, displayedComponents: .hourAndMinute)
+                    .labelsHidden()
+            } else {
+                Text("Not set")
+                    .foregroundStyle(.workLogPlaceholderText)
+            }
         }
     }
 
@@ -1091,8 +1111,8 @@ private struct InterviewRoundEditor: View {
                 }
             }
             .labelsHidden()
-            .frame(maxWidth: 220, alignment: .leading)
-            LabeledTextEditor(title: "Feedback", text: $round.feedback, minHeight: 70)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            LabeledTextEditor(title: "Questions/Feedback", text: $round.feedback, minHeight: 70)
 
             if round.isImportedFromCalendar {
                 Divider()
@@ -1206,6 +1226,108 @@ private struct InterviewRoundEditor: View {
         merged.hour = timeComponents.hour
         merged.minute = timeComponents.minute
         return calendar.date(from: merged) ?? existingDate
+    }
+}
+
+private struct InterviewFollowUpStatusChip: View {
+    var status: InterviewFollowUpStatus
+
+    private var tint: Color {
+        switch status {
+        case .active:
+            return .workLogSkyBlue
+        case .due:
+            return .workLogDoingYellow
+        case .completed:
+            return .secondary
+        }
+    }
+
+    var body: some View {
+        Text(status.rawValue)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+    }
+}
+
+private struct InterviewFollowUpReadOnlyRow: View {
+    var followUp: InterviewFollowUp
+    var linkedRoundName: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: followUp.isCompleted ? "checkmark.square.fill" : "square")
+                    .foregroundStyle(followUp.isCompleted ? .workLogIconGreen : .secondary)
+                    .padding(.top, 1)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .center, spacing: 8) {
+                        Text(followUp.actionLabel)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 12)
+                        InterviewFollowUpStatusChip(status: followUp.status())
+                    }
+
+                    ReadOnlyDetailField(
+                        title: "Due Date",
+                        value: followUp.dueDate.map(AppDateFormatters.calendarDateTime.string(from:)) ?? "",
+                        hideWhenEmpty: false
+                    )
+
+                    if !linkedRoundName.isBlank {
+                        ReadOnlyDetailField(title: "Linked Round", value: linkedRoundName, hideWhenEmpty: false)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.quaternary)
+        }
+    }
+}
+
+private struct InterviewFollowUpEditor: View {
+    @Binding var followUp: InterviewFollowUp
+    var linkedRoundName: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Toggle("", isOn: $followUp.isCompleted)
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+                    .padding(.top, 1)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    TextField("Follow up, prepare, wait, reapply, etc.", text: $followUp.action)
+
+                    HStack(alignment: .center, spacing: 8) {
+                        InterviewFollowUpStatusChip(status: followUp.status())
+                        if !linkedRoundName.isBlank {
+                            Label(linkedRoundName, systemImage: "link")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+
+            InterviewFollowUpDateField(date: $followUp.dueDate)
+                .padding(.leading, 28)
+        }
+        .padding(10)
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.quaternary)
+        }
     }
 }
 
